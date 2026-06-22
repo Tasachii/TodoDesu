@@ -1,72 +1,51 @@
 # TodoDesu トドデス。
 
-A local-first todo application for Mac, iPhone, and iPad, paired with a terminal CLI that
-shares the same data. Capture a task from the command line in seconds, organize it on a
-kanban board from your iPad, run a focus session, and review your week on the calendar —
+TodoDesu is a local-first todo application for Mac, iPhone, and iPad, paired with a terminal
+CLI that shares the same data. Capture a task from the command line in seconds, organize it
+on a kanban board from your iPad, run a focus session, and review your week on the calendar —
 all backed by a single SQLite file on your machine. No accounts, no cloud, no tracking.
+The web build also runs fully standalone in the browser with data in `localStorage`, so the
+live demo at `https://tasachii.github.io/TodoDesu/` costs nothing to host and requires no
+server.
 
-**Try it now:** https://tasachii.github.io/TodoDesu/
+**Live** — [tasachii.github.io/TodoDesu](https://tasachii.github.io/TodoDesu/) · **Issues** — [github.com/Tasachii/TodoDesu/issues](https://github.com/Tasachii/TodoDesu/issues)
+
+---
+
+## Screenshots
 
 | Today — Wa (和) theme | Focus — Pomodoro with the ensō ring |
-|---|---|
+| --- | --- |
 | ![Today view in the Wa theme](docs/images/today-wa.jpg) | ![Pomodoro focus in the Wa theme](docs/images/focus-wa.jpg) |
 
 | Today — light theme | Board — brush-stroke strikethroughs |
-|---|---|
+| --- | --- |
 | ![Today view in the light theme](docs/images/today-light.jpg) | ![Kanban board in the Wa theme](docs/images/board-wa.jpg) |
 
-## Why this exists
+---
 
-Most todo apps force a choice: fast capture (terminal tools) or rich organization
-(GUI apps). TodoDesu does both against one source of truth. The REST API is the single
-authority over the data; the web app and the CLI are equal clients, so a task added with
-`todo add` appears in the browser instantly, and a card dragged to *Done* on the board is
-reflected in the next `todo list`.
+## What it is
 
-## Features
+Most todo apps force a choice: fast capture (terminal tools) or rich organization (GUI apps).
+TodoDesu does both against one source of truth. The REST API is the single authority over the
+data; the web app and the CLI are equal clients, so a task added with `todo add` appears in
+the browser instantly, and a card dragged to *Done* on the board is reflected in the next
+`todo list`.
 
-### Task management
-- Quick-add bar on the web (type, press Enter) and `todo add` in the terminal — both
-  understand natural-language dates: type "pay rent tomorrow 6pm" and the date is
-  detected while you type, shown as a chip, and stripped from the title (with a
-  "keep as text" escape hatch)
-- Search everything (titles and notes) from the magnifier button or the `/` key
-- Keyboard shortcuts: `n` new task, `1–4` switch views, `/` search, `esc` closes
-  any sheet
-- Tasks carry a due date and time, free-form notes, and a priority (none / low / medium / high)
-- **Recurring tasks** — daily, weekly, or monthly; completing one schedules the next
-  occurrence automatically (always in the future, even if you finished late)
-- Swipe right on a task to complete it, swipe left to delete; both actions show a
-  five-second Undo toast
-- Deletion is always a soft delete; deleted tasks are recoverable for 30 days before
-  being purged
-- Tapping a task opens a detail sheet for editing title, notes, schedule, and priority
+- **Stack** — React 18 · Vite · Tailwind CSS v4 · TanStack Query · dnd-kit · framer-motion · Fastify 5 · `node:sqlite` · Capacitor 8 · commander · chrono-node · Vitest · Playwright
 
-### Views
-- **Today** — sections for Overdue, Today, Tomorrow, and Inbox (tasks without a date)
-- **Board** — three columns (To do / In progress / Done) with drag and drop, including
-  touch support on iPad; cards can also be reordered within a column
-- **Calendar** — month grid with markers on days that have tasks, plus an Upcoming list
-  covering the next seven days
-- **Focus** — a countdown ring tied to a task, with two styles: a plain timer
-  (15/25/45/custom minutes with an optional break) and a Pomodoro cycle (25/5 or 50/10
-  work/break rounds with a long break after the fourth round, breaks starting
-  automatically). Both play a completion chime and feed daily statistics (minutes
-  focused, sessions, tasks completed)
-
-### Platform
-- Four themes: auto / light / dark / **Wa (和)** — a warm Japanese mode: washi-paper tones,
-  sumi ink, a single vermillion accent, Mincho display type, an ensō focus ring, a hanko
-  完 stamp on completed tasks, and brush-stroke strikethroughs
-- Installable as a PWA on iPhone, iPad, and Mac (Safari, Add to Home Screen)
-- Builds as a native iOS app (Capacitor) ready for the App Store: on the phone the app
-  runs fully standalone with an on-device data engine — no server, no account, no
-  network. See [`docs/APP_STORE.md`](docs/APP_STORE.md)
-- Accessible from other devices on the same Wi-Fi network when LAN mode is enabled
-- The focus timer derives remaining time from timestamps, so it stays correct even when
-  iOS suspends the page in the background
+---
 
 ## Architecture
+
+The repository is an npm-workspaces monorepo with four packages:
+
+| Package | Role | Key technology |
+| --- | --- | --- |
+| `packages/core` | Shared recurrence logic (`nextDueAt`) | Pure JS, zero dependencies |
+| `packages/server` | REST API, data layer, serves the web build | Fastify 5, `node:sqlite` |
+| `packages/web` | Progressive web app + iOS native app | React 18, Vite, Capacitor 8 |
+| `packages/cli` | `todo` command | commander, chrono-node, picocolors |
 
 ```
 CLI (todo) ----+
@@ -75,94 +54,82 @@ Browser -------+              |
                               +--- serves the built web app (packages/web/dist)
 ```
 
-The repository is an npm-workspaces monorepo:
+Design decisions:
 
-| Package | Role | Key technology |
-|---|---|---|
-| `packages/server` | REST API, data layer, serves the web build | Fastify 5, built-in `node:sqlite` |
-| `packages/web` | Progressive web app | React 18, Vite, Tailwind CSS v4, TanStack Query, dnd-kit, framer-motion |
-| `packages/cli` | `todo` command | commander, chrono-node, picocolors |
+| Topic | Decision |
+| --- | --- |
+| Dual data engine | The web build detects whether a server is reachable. When it is, all writes go through the Fastify API to SQLite. When it is not (GitHub Pages, App Store build), the app switches to a `localStorage` engine that is kept at full feature parity with the server engine. |
+| `node:sqlite` over an ORM | Node 23 ships SQLite in the standard library — no native compilation, no driver to pin. The database is a single file; backing up means copying it. |
+| CLI never touches the DB directly | The CLI speaks to the same API as the browser and transparently starts the server when it is not running. Business rules live in exactly one place. |
+| Timezone-safe by construction | The server never computes "today". Clients convert their local day boundaries to UTC and pass explicit ranges. |
+| Fractional ordering | Card positions use a `REAL` sort key, so dropping a card between two others writes a single midpoint value instead of re-indexing the column. |
+| Shared recurrence in `@todoo/core` | `nextDueAt` is extracted into a zero-dependency package so the server engine and the standalone localStorage engine share identical recurrence logic and can be tested independently at 100 % coverage. |
 
-Design decisions worth noting:
-
-- **`node:sqlite` over an ORM or native driver.** Node 23 ships SQLite in the standard
-  library, which removes native compilation entirely. The database is one file; backing
-  up means copying it.
-- **The CLI never touches the database directly.** It speaks to the same API as the
-  browser and transparently starts the server when it is not running, so business rules
-  live in exactly one place.
-- **Timezone-safe by construction.** The server never computes "today"; clients convert
-  their local day boundaries to UTC and pass explicit ranges.
-- **Fractional ordering.** Card positions use a `REAL` sort key, so dropping a card
-  between two others writes a single midpoint value instead of re-indexing the column.
-
-The full plan, requirements, and API contract are in [`docs/`](docs/).
-
-## Requirements
-
-- Node.js 23.4 or newer (for the built-in `node:sqlite` module) — check with `node -v`
-- macOS is the primary target; Linux works as well. On **Windows**, the server, web
-  app, and tests run fine in PowerShell or WSL; the only macOS-specific command is
-  `todo open` (it shells out to `open`)
+---
 
 ## Installation
 
-macOS / Linux (Terminal) and Windows (PowerShell) use the same commands:
+**Requirements** — [Node.js 23.4+](https://nodejs.org) (for the built-in `node:sqlite` module) — check with `node -v`
 
+macOS is the primary target; Linux works as well. On **Windows**, the server, web app, and
+tests run in PowerShell or WSL; the only macOS-specific command is `todo open` (it shells
+out to `open`).
+
+**Mac / Linux**
 ```bash
 git clone https://github.com/Tasachii/TodoDesu.git
 cd TodoDesu
 npm install
+npm run cli:link      # install the `todo` command globally
 ```
 
-Install the `todo` command globally:
-
-```bash
-npm run cli:link
+**Windows**
+```bat
+git clone https://github.com/Tasachii/TodoDesu.git
+cd TodoDesu
+npm install
+npm run cli:link      :: install the `todo` command globally
 ```
 
-No database setup is needed — SQLite ships inside Node and the file is created on
-first run at `~/.todoo/data.db`.
+No database setup is needed — SQLite ships inside Node and the file is created on first run
+at `~/.todoo/data.db`.
 
-## Usage
+---
+
+## Running
 
 ### Development
 
 ```bash
-npm run dev
+npm run dev           # start API on :4521 + Vite dev server on :5173 (concurrently)
 ```
-
-This starts the API server on `http://127.0.0.1:4521` and the Vite dev server on
-`http://localhost:5173` (with `/api` proxied to the backend).
-
-### Free hosting (share it with anyone)
-
-The repository ships a GitHub Pages workflow that publishes the **standalone build** —
-the app runs entirely in the visitor's browser with their data in localStorage, so
-hosting costs nothing and no server is involved. Enable it once: repo **Settings →
-Pages → Source: GitHub Actions**, then every push to `main` deploys to
-`https://<user>.github.io/<repo>/`. Visitors on a phone can Add to Home Screen for an
-app-like install, and the Settings sheet (gear icon) exports/imports backups to move
-data between devices.
 
 ### Daily use
 
 ```bash
-npm run build    # build the web app once
-npm start        # serve app + API together at http://127.0.0.1:4521
+npm run build         # build the web app once (packages/web/dist)
+npm start             # serve app + API together at http://127.0.0.1:4521
 ```
 
-To use TodoDesu from an iPhone or iPad on the same Wi-Fi network:
+### LAN mode (iPhone / iPad on the same Wi-Fi)
 
 ```bash
-TODOO_HOST=0.0.0.0 npm start
+TODOO_HOST=0.0.0.0 npm start    # bind to all interfaces; open http://<mac-ip>:4521 in Safari
 ```
 
-Then open `http://<your-mac-ip>:4521` in Safari and choose **Add to Home Screen** to
-install it as an app. Note that LAN mode has no authentication; use it only on networks
-you trust.
+Then choose **Add to Home Screen** to install as an app. LAN mode has no authentication by
+default — use it only on networks you trust, or set `TODOO_TOKEN` (see Configuration).
 
-### CLI reference
+### Free public hosting (GitHub Pages)
+
+Enable once: repo **Settings → Pages → Source: GitHub Actions**, then every push to `main`
+deploys the standalone build to `https://<user>.github.io/<repo>/`. Visitors can **Add to
+Home Screen** for an app-like install; the **Settings** sheet (gear icon) exports and imports
+backups to move data between devices.
+
+---
+
+## CLI reference
 
 ```
 todo                          List overdue, today, and inbox tasks
@@ -176,75 +143,91 @@ todo done <n>                 Complete task <n> from the last printed list
 todo start <n>                Move task <n> to In progress
 todo rm <n>                   Delete task <n> (soft delete)
 todo undo                     Undo the last done/rm action
-todo focus <n> [-t minutes]   Run a focus session in the terminal (default 25)
-todo open                     Open the web app in the browser
+todo focus <n> [-t minutes]   Run a focus session in the terminal (default 25 min)
+todo open                     Open the web app in the browser (macOS)
 todo server <action>          start | stop | status
 ```
 
-List numbers refer to the most recently printed list, so a typical flow is `todo`,
-then `todo done 2`.
+List numbers refer to the most recently printed list — a typical flow is `todo`, then
+`todo done 2`.
 
-### Two-minute tutorial
+---
 
-1. `npm run build && npm start`, then open `http://127.0.0.1:4521`.
-2. Type **"pay rent tomorrow 6pm"** in the quick-add bar — watch the date chip appear —
-   and press Enter.
-3. Press `2` to open the **Board**, drag the card to *In progress*.
-4. Press `4` for **Focus**, switch the header toggle to **Pomodoro**, hit *Start
-   focusing* — when the chime plays, the break starts by itself.
-5. Swipe the task right (or click its circle) to complete it — try the **和** theme
-   first (theme button) to see the hanko 完 stamp.
-6. Press `/` to search anything you've ever added; open Settings (gear) to export a
-   backup. In the terminal, `todo` then `todo done 1` closes the loop.
+## Usage
 
-### Configuration
+1. **Start the app.** `npm run build && npm start`, then open `http://127.0.0.1:4521`.
+2. **Add a task with a natural-language date (1 action).** Type **"pay rent tomorrow 6pm"** in the quick-add bar — the date chip appears as you type, stripped from the title — and press Enter.
+3. **Move it on the Board (2 taps).** Press `2` to open the **Board**, drag the card to *In progress*.
+4. **Run a Pomodoro session (2 taps).** Press `4` for **Focus**, switch the header toggle to **Pomodoro**, hit *Start focusing* — when the chime plays, the break starts automatically.
+5. **Complete the task.** Swipe right (or click the circle) — try the **和** theme (theme button) to see the hanko 完 stamp and brush-stroke strikethrough.
+6. **Search and export.** Press `/` to search everything ever added; open **Settings** (gear) to export a backup.
 
-| Environment variable | Default | Purpose |
-|---|---|---|
-| `TODOO_PORT` | `4521` | API/server port |
-| `TODOO_HOST` | `127.0.0.1` | Bind address; set `0.0.0.0` to allow LAN access |
+Keyboard shortcuts: `n` new task · `1–4` switch views · `/` search · `Esc` closes any sheet.
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TODOO_PORT` | `4521` | API and server port |
+| `TODOO_HOST` | `127.0.0.1` | Bind address — set `0.0.0.0` to allow LAN access |
 | `TODOO_DB` | `~/.todoo/data.db` | Database file path (`:memory:` for throwaway runs) |
-| `TODOO_TOKEN` | _(unset)_ | Optional bearer token. When set **and** `TODOO_HOST` is non-loopback, mutating routes (POST/PUT/PATCH/DELETE) require `Authorization: Bearer <token>`; reads stay open. Loopback is never gated. |
+| `TODOO_TOKEN` | _(unset)_ | Optional bearer token. When set and `TODOO_HOST` is non-loopback, mutating routes (POST / PUT / PATCH / DELETE) require `Authorization: Bearer <token>`; reads stay open. Loopback is never gated. |
+
+---
 
 ## Testing
 
 ```bash
-npm test               # all four vitest suites (core, server, cli, web)
-npm run test:coverage  # the same suites with v8 coverage + enforced thresholds
-npm run lint           # ESLint (flat config) + react-hooks across every package
-npm run test:e2e -w @todoo/web   # Playwright smoke suite (build first)
+npm test                              # all four Vitest suites in order
+npm run test:coverage                 # same suites with v8 coverage + enforced thresholds
+npm run lint                          # ESLint flat config + react-hooks across every package
+npm run test:e2e -w @todoo/web        # Playwright smoke suite (build first)
 ```
 
-The test pyramid:
+224 unit tests across four workspaces, plus 7 Playwright e2e scenarios:
 
-| Suite | Command | What it covers |
-|---|---|---|
-| **`@todoo/core`** (23) | `npm test -w @todoo/core` | the shared `nextDueAt` recurrence rule — daily/weekly/monthly, DST, leap years, multi-miss catch-up, and server↔engine parity (100% covered) |
-| **`@todoo/server`** (47) | `npm test -w @todoo/server` | every endpoint via Fastify injection (no real network): CRUD, recurrence through the route with an injected clock, focus start/stop incl. the backward-clock 0-clamp and idempotency, `q`-search, stats range edges, backup round-trip, and optional LAN token auth |
-| **`@todoo/cli`** (54) | `npm test -w @todoo/cli` | natural-language date parsing, the api wrapper against a live server, the on-disk state store, and every command handler (`done`/`rm`/`undo`/`focus`/`server`…) driven through injectable deps |
-| **`@todoo/web`** (100) | `npm test -w @todoo/web` | the standalone localStorage engine, quick-add date detection, the `useTasks` optimistic-update + rollback write path, the extracted focus/pomodoro engine and its once-only guards, theme switching, the board's fractional-midpoint reorder math, and the HTTP client |
-| **e2e** (7 scenarios) | `npm run test:e2e -w @todoo/web` | Playwright smoke against the real build + real server in headless Chromium: quick-add NL date, undo toast, search, the 和 theme, board columns, pomodoro mode switch, and a recurring-task spawn |
+| Suite | Count | What it covers |
+| --- | --- | --- |
+| `@todoo/core` | 23 | `nextDueAt` recurrence rule — daily/weekly/monthly, DST, leap years, multi-miss catch-up, and server ⇄ engine parity (100 % coverage enforced) |
+| `@todoo/server` | 47 | Every endpoint via Fastify injection (no real network): CRUD, recurrence with an injected clock, focus start/stop incl. backward-clock 0-clamp and idempotency, `q`-search, stats range edges, backup round-trip, optional LAN token auth |
+| `@todoo/cli` | 54 | Natural-language date parsing, API wrapper against a live server, on-disk state store, every command handler (`done` / `rm` / `undo` / `focus` / `server` …) driven through injectable deps |
+| `@todoo/web` | 100 | Standalone localStorage engine, quick-add date detection, `useTasks` optimistic-update + rollback, focus/pomodoro engine with once-only guards, theme switching, board fractional-midpoint reorder, HTTP client |
+| e2e | 7 scenarios | Playwright smoke against the real build + real server in headless Chromium: quick-add NL date, undo toast, search, the 和 theme, board columns, pomodoro mode switch, recurring-task spawn |
 
 Coverage thresholds are enforced per package in each `vitest.config.js` (server 90 / cli 80
-lines; `@todoo/core` 100; web gates `hooks`/`api`/`lib` hard). CI runs `npm test`, the
+lines; `@todoo/core` 100; web gates `hooks` / `api` / `lib` hard). CI runs `npm test`, the
 coverage gate, `npm run lint`, the build, and the e2e suite on every push and PR.
+
+---
 
 ## Project documentation
 
-- [`DESCRIPTION.md`](DESCRIPTION.md) — project story: overview, concept, module diagram, statistics design
-- [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) — the full picture: how every part of the code works, data flows, and design decisions
-- [`docs/PLAN.md`](docs/PLAN.md) — technical plan, milestones, and risk register
-- [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — functional and non-functional requirements
-- [`docs/API.md`](docs/API.md) — REST API contract
-- [`docs/QA_PLAN.md`](docs/QA_PLAN.md) — test pyramid, pre-commit gates, manual checklist
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — what to build next, with starting points in the code
-- [`docs/APP_STORE.md`](docs/APP_STORE.md) — building the native iOS app and shipping to the App Store
-- [`SKILLS.md`](SKILLS.md) — log of skills and techniques used while building this project
+| File | Contents |
+| --- | --- |
+| [`DESCRIPTION.md`](DESCRIPTION.md) | Project story: overview, concept, module diagram, statistics design |
+| [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) | How every part of the code works, data flows, and design decisions |
+| [`docs/PLAN.md`](docs/PLAN.md) | Technical plan, milestones, and risk register |
+| [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Functional and non-functional requirements |
+| [`docs/API.md`](docs/API.md) | REST API contract |
+| [`docs/QA_PLAN.md`](docs/QA_PLAN.md) | Test pyramid, pre-commit gates, manual checklist |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to build next, with starting points in the code |
+| [`docs/APP_STORE.md`](docs/APP_STORE.md) | Building the native iOS app and shipping to the App Store |
+| [`SKILLS.md`](SKILLS.md) | Log of skills and techniques used while building this project |
+
+---
 
 ## Roadmap
 
 Recurring tasks and natural-language quick-add have shipped. Next, in order of value:
-cross-device sync (free-tier, keeping the local-first promise), Thai natural-language
-dates, and weekly statistics with streaks. The full plan — with starting points in the
-code, design constraints, and the ideas we deliberately rejected — lives in
-[`docs/ROADMAP.md`](docs/ROADMAP.md): start there if you're picking the project up.
+cross-device sync (free-tier, keeping the local-first promise), Thai natural-language dates,
+and weekly statistics with streaks. The full plan — with starting points in the code, design
+constraints, and the ideas deliberately rejected — lives in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+---
+
+## License
+
+MIT © Phasathat Jaruchitsophon
