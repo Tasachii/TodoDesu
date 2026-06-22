@@ -40,7 +40,9 @@ export function clearLastAction() {
   ensureDir()
   try {
     writeFileSync(join(dir, 'last-action.json'), 'null', 'utf8')
-  } catch {}
+  } catch {
+    /* best-effort clear — ignore write failures */
+  }
 }
 
 export function readServerPid() {

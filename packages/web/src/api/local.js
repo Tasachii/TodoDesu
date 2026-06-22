@@ -5,7 +5,11 @@
 //
 // It implements exactly the surface the web app uses (see client.js), with
 // the same shapes and the same error codes, so the views cannot tell the
-// difference. Keep rule changes in sync with packages/server/src/routes/.
+// difference. Shared business rules (e.g. nextDueAt) live in @todoo/core so
+// this engine and the server can never drift; keep the rest of the surface in
+// sync with packages/server/src/routes/.
+
+import { nextDueAt } from '@todoo/core'
 
 const STORAGE_KEY = 'todoo-data-v1'
 const PURGE_AFTER_DAYS = 30
@@ -25,25 +29,6 @@ function apiError(code, message) {
   const err = new Error(message)
   err.code = code
   return err
-}
-
-// The next occurrence keeps the time of day and always lands in the future.
-// Monthly keeps the day-of-month, clamping in shorter months (never
-// overflowing). Mirrors nextDueAt in packages/server/src/routes/tasks.js.
-function nextDueAt(dueIso, repeat, now = new Date()) {
-  const d = new Date(dueIso)
-  const anchorDay = d.getDate()
-  do {
-    if (repeat === 'daily') d.setDate(d.getDate() + 1)
-    else if (repeat === 'weekly') d.setDate(d.getDate() + 7)
-    else {
-      d.setDate(1)
-      d.setMonth(d.getMonth() + 1)
-      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-      d.setDate(Math.min(anchorDay, daysInMonth))
-    }
-  } while (d <= now)
-  return d.toISOString()
 }
 
 // Mirrors the server's JSON-schema bounds for the fields the engine accepts.

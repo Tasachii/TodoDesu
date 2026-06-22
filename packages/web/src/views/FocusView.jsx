@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.js'
 import { useTasks, useTaskMutations } from '../hooks/useTasks.js'
-import { localDayRange, dayKey } from '../lib/dates.js'
+import { useNow, usePomodoro, mmss } from '../hooks/useFocusEngine.js'
+import { localDayRange } from '../lib/dates.js'
 
 const TIMER_PRESETS = [15, 25, 45]
 // work/break minutes — the classic pomodoro and a deep-work variant
@@ -11,23 +12,6 @@ const POMODORO_PRESETS = [
   { work: 25, brk: 5 },
   { work: 50, brk: 10 },
 ]
-const ROUND_KEY = 'todoo-pomodoro-round'
-
-// The current round survives a reload but resets each day.
-function loadRound() {
-  const raw = localStorage.getItem(ROUND_KEY)
-  if (!raw) return 1
-  try {
-    const { round, day } = JSON.parse(raw)
-    if (day === dayKey(new Date()) && Number.isInteger(round) && round >= 1) return round
-  } catch {
-    /* corrupt — start fresh */
-  }
-  return 1
-}
-function saveRound(round) {
-  localStorage.setItem(ROUND_KEY, JSON.stringify({ round, day: dayKey(new Date()) }))
-}
 
 // Two soft sine notes — no asset files needed.
 function chime() {
@@ -52,23 +36,6 @@ function chime() {
   } catch {
     /* audio not available — fine */
   }
-}
-
-// Always derive time from timestamps: iOS suspends JS in background,
-// so counting down with an interval would drift.
-function useNow(running) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!running) return
-    const id = setInterval(() => setNow(Date.now()), 250)
-    const onVisible = () => setNow(Date.now())
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [running])
-  return now
 }
 
 function Ring({ progress, label, sub, color = 'text-accent' }) {
@@ -132,11 +99,6 @@ function RoundDots({ round, total }) {
   )
 }
 
-const mmss = (sec) => {
-  const s = Math.max(0, Math.round(sec))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
-
 export default function FocusView() {
   const qc = useQueryClient()
   const location = useLocation()
@@ -165,13 +127,19 @@ export default function FocusView() {
   const [taskId, setTaskId] = useState(() => location.state?.taskId)
   const [minutes, setMinutes] = useState(null)
   const [finished, setFinished] = useState(null) // session that just completed
-  const [breakUntil, setBreakUntil] = useState(null)
-  const [breakTotal, setBreakTotal] = useState(300) // seconds, for the break ring
-  const [breakKind, setBreakKind] = useState('short') // 'short' | 'long'
-  // Captured when a break starts, so toggling the style mid-break
-  // cannot change how (or whether) the round advances.
-  const [breakMode, setBreakMode] = useState('timer')
-  const [round, setRound] = useState(loadRound)
+  // Round + break state machine (with its once-per-break guard) lives in the
+  // engine hook so the effects below depend only on stable callbacks.
+  const {
+    round,
+    breakUntil,
+    breakTotal,
+    breakKind,
+    breakMode,
+    startBreak,
+    startPomodoroBreak,
+    endBreak,
+    resetCycle,
+  } = usePomodoro()
   // Local override so the toggle feels instant; the saved setting syncs devices.
   const [modeChoice, setModeChoice] = useState(null)
   const [pomoChoice, setPomoChoice] = useState(null)
@@ -239,37 +207,26 @@ export default function FocusView() {
       setFinished(session)
       stop.mutate({ id: session.id, completed: true })
       if (mode === 'pomodoro') {
-        // classic pomodoro: the break starts itself; the long one after the last round
-        const isLong = round >= totalRounds
-        const sec = (isLong ? longMin : brkMin) * 60
-        setBreakKind(isLong ? 'long' : 'short')
-        setBreakMode('pomodoro')
-        setBreakTotal(sec)
-        setBreakUntil(Date.now() + sec * 1000)
+        // classic pomodoro: the break starts itself; the long one after the
+        // last round. startPomodoroBreak reads the current round internally.
+        startPomodoroBreak({ totalRounds, brkMin, longMin })
       }
     }
-  }, [session, remaining, stop, mode, round, totalRounds, brkMin, longMin])
+  }, [session, remaining, stop, mode, totalRounds, brkMin, longMin, startPomodoroBreak])
 
   const breakRemaining = breakUntil ? (breakUntil - now) / 1000 : 0
-  // end exactly once per break (mirrors finishedFor); breakUntil doubles as the break's id
-  const breakEndedFor = useRef(null)
-  const endBreak = () => {
-    if (breakUntil == null || breakEndedFor.current === breakUntil) return
-    breakEndedFor.current = breakUntil
-    setBreakUntil(null)
-    if (breakMode === 'pomodoro') {
-      const next = breakKind === 'long' ? 1 : round + 1
-      setRound(next)
-      saveRound(next)
-      setFinished(null)
-    }
-  }
+  // Ending a pomodoro break clears the "session complete" card too. The
+  // engine's endBreak is the once-per-break guard and returns whether it
+  // actually advanced, so this wrapper only resets `finished` on a real end.
+  const handleEndBreak = useCallback(() => {
+    if (endBreak() && breakMode === 'pomodoro') setFinished(null)
+  }, [endBreak, breakMode])
   useEffect(() => {
-    if (breakUntil && breakRemaining <= 0 && breakEndedFor.current !== breakUntil) {
+    if (breakUntil && breakRemaining <= 0) {
       chime()
-      endBreak()
+      handleEndBreak()
     }
-  }, [breakUntil, breakRemaining, breakMode, breakKind, round]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [breakUntil, breakRemaining, handleEndBreak])
 
   const focusedMin = Math.round((stats?.focus_sec ?? 0) / 60)
 
@@ -336,7 +293,7 @@ export default function FocusView() {
               </button>
             )}
             <button
-              onClick={endBreak}
+              onClick={handleEndBreak}
               className="rounded-full border border-stone-300 px-6 py-2.5 text-sm text-stone-500 transition-colors hover:border-stone-400 dark:border-stone-600 dark:text-stone-400"
             >
               Skip break
@@ -383,10 +340,12 @@ export default function FocusView() {
             <button
               onClick={() => {
                 setFinished(null)
-                setBreakKind('short')
-                setBreakMode('timer')
-                setBreakTotal(breakMinutes * 60)
-                setBreakUntil(Date.now() + breakMinutes * 60_000)
+                startBreak({
+                  kind: 'short',
+                  mode: 'timer',
+                  total: breakMinutes * 60,
+                  until: Date.now() + breakMinutes * 60_000,
+                })
               }}
               className="rounded-xl bg-emerald-500/10 py-2.5 text-sm font-medium text-emerald-600 dark:text-emerald-400"
             >
@@ -485,10 +444,7 @@ export default function FocusView() {
             </button>
             {mode === 'pomodoro' && round > 1 && (
               <button
-                onClick={() => {
-                  setRound(1)
-                  saveRound(1)
-                }}
+                onClick={() => resetCycle(1)}
                 className="w-full py-1 text-center text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
               >
                 Reset cycle

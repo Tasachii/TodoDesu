@@ -204,15 +204,30 @@ then `todo done 2`.
 | `TODOO_PORT` | `4521` | API/server port |
 | `TODOO_HOST` | `127.0.0.1` | Bind address; set `0.0.0.0` to allow LAN access |
 | `TODOO_DB` | `~/.todoo/data.db` | Database file path (`:memory:` for throwaway runs) |
+| `TODOO_TOKEN` | _(unset)_ | Optional bearer token. When set **and** `TODOO_HOST` is non-loopback, mutating routes (POST/PUT/PATCH/DELETE) require `Authorization: Bearer <token>`; reads stay open. Loopback is never gated. |
 
 ## Testing
 
 ```bash
-npm test
+npm test               # all four vitest suites (core, server, cli, web)
+npm run test:coverage  # the same suites with v8 coverage + enforced thresholds
+npm run lint           # ESLint (flat config) + react-hooks across every package
+npm run test:e2e -w @todoo/web   # Playwright smoke suite (build first)
 ```
 
-Runs the server integration suite (every endpoint, via Fastify's injection, no real
-network) and the CLI unit tests (natural-language date parsing).
+The test pyramid:
+
+| Suite | Command | What it covers |
+|---|---|---|
+| **`@todoo/core`** (23) | `npm test -w @todoo/core` | the shared `nextDueAt` recurrence rule — daily/weekly/monthly, DST, leap years, multi-miss catch-up, and server↔engine parity (100% covered) |
+| **`@todoo/server`** (47) | `npm test -w @todoo/server` | every endpoint via Fastify injection (no real network): CRUD, recurrence through the route with an injected clock, focus start/stop incl. the backward-clock 0-clamp and idempotency, `q`-search, stats range edges, backup round-trip, and optional LAN token auth |
+| **`@todoo/cli`** (54) | `npm test -w @todoo/cli` | natural-language date parsing, the api wrapper against a live server, the on-disk state store, and every command handler (`done`/`rm`/`undo`/`focus`/`server`…) driven through injectable deps |
+| **`@todoo/web`** (100) | `npm test -w @todoo/web` | the standalone localStorage engine, quick-add date detection, the `useTasks` optimistic-update + rollback write path, the extracted focus/pomodoro engine and its once-only guards, theme switching, the board's fractional-midpoint reorder math, and the HTTP client |
+| **e2e** (7 scenarios) | `npm run test:e2e -w @todoo/web` | Playwright smoke against the real build + real server in headless Chromium: quick-add NL date, undo toast, search, the 和 theme, board columns, pomodoro mode switch, and a recurring-task spawn |
+
+Coverage thresholds are enforced per package in each `vitest.config.js` (server 90 / cli 80
+lines; `@todoo/core` 100; web gates `hooks`/`api`/`lib` hard). CI runs `npm test`, the
+coverage gate, `npm run lint`, the build, and the e2e suite on every push and PR.
 
 ## Project documentation
 

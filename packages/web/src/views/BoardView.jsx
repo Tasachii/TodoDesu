@@ -29,6 +29,22 @@ const COLUMNS = [
   { id: 'done', title: 'Done' },
 ]
 
+// Sort key for a card dropped at `index` in `list` (the target column with the
+// dragged card already removed). Dropping between two cards takes the
+// fractional midpoint so no neighbours need renumbering; ends and empty
+// columns fall back to ±1 / 1. Exported for unit tests.
+export function computeSortOrder(list, index) {
+  const before = list[index - 1]
+  const after = list[index]
+  return before && after
+    ? (before.sort_order + after.sort_order) / 2
+    : after
+      ? after.sort_order - 1
+      : before
+        ? before.sort_order + 1
+        : 1
+}
+
 function Card({ task, overlay = false }) {
   const done = task.status === 'done'
   return (
@@ -150,16 +166,7 @@ export default function BoardView() {
 
     const list = byColumn[targetStatus].filter((t) => t.id !== task.id)
     const index = overTask ? list.findIndex((t) => t.id === overTask.id) : list.length
-    const before = list[index - 1]
-    const after = list[index]
-    const sort_order =
-      before && after
-        ? (before.sort_order + after.sort_order) / 2
-        : after
-          ? after.sort_order - 1
-          : before
-            ? before.sort_order + 1
-            : 1
+    const sort_order = computeSortOrder(list, index)
 
     if (targetStatus === task.status && sort_order === task.sort_order) return
     patch.mutate({ id: task.id, status: targetStatus, sort_order })

@@ -1,29 +1,68 @@
 import { program } from 'commander'
 import pc from 'picocolors'
-import { api } from './api.js'
+import { api as defaultApi } from './api.js'
 import { parseDue } from './dates.js'
-import { printList, formatDue, isOverdue, isDueToday } from './format.js'
-import { readLastList, writeLastList, readLastAction, writeLastAction, clearLastAction } from './state.js'
-import { execSync, spawn } from 'node:child_process'
+import { printList, formatDue } from './format.js'
+import {
+  readLastList,
+  writeLastList,
+  readLastAction,
+  writeLastAction,
+  clearLastAction,
+  readServerPid,
+} from './state.js'
+import { execFileSync } from 'node:child_process'
+
+// ── dependency injection ───────────────────────────────────────────────────────
+// Command handlers take a `deps` bag so the test suite can drive them with a
+// fake api/io/process. Production wiring (below) passes nothing, so the real
+// implementations are used and runtime behavior is unchanged.
+
+function defaultDeps() {
+  return {
+    api: defaultApi,
+    log: (...a) => console.log(...a),
+    error: (...a) => console.error(...a),
+    write: (s) => process.stdout.write(s),
+    exit: (code) => process.exit(code),
+    state: {
+      readLastList,
+      writeLastList,
+      readLastAction,
+      writeLastAction,
+      clearLastAction,
+      readServerPid,
+    },
+    exec: execFileSync,
+    kill: (pid, sig) => process.kill(pid, sig),
+    onSignal: (sig, fn) => process.once(sig, fn),
+    offSignal: (sig, fn) => process.removeListener(sig, fn),
+    setTimer: (fn, ms) => setInterval(fn, ms),
+    clearTimer: (id) => clearInterval(id),
+    now: () => Date.now(),
+  }
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function handleError(err) {
-  console.error(pc.red(`Error: ${err.message}`))
-  process.exit(1)
+function handleError(err, deps) {
+  deps.error(pc.red(`Error: ${err.message}`))
+  deps.exit(1)
 }
 
-function resolveIndex(n) {
+function resolveIndex(n, deps = defaultDeps()) {
   const idx = parseInt(n, 10)
-  const mapping = readLastList()
+  const mapping = deps.state.readLastList()
   if (!mapping) {
-    console.error(pc.yellow('No task list found. Run `todo` first to see your tasks.'))
-    process.exit(1)
+    deps.error(pc.yellow('No task list found. Run `todo` first to see your tasks.'))
+    deps.exit(1)
+    return
   }
   const id = mapping[idx]
   if (!id) {
-    console.error(pc.yellow(`Index ${idx} not found. Run \`todo\` first to see your tasks.`))
-    process.exit(1)
+    deps.error(pc.yellow(`Index ${idx} not found. Run \`todo\` first to see your tasks.`))
+    deps.exit(1)
+    return
   }
   return id
 }
@@ -31,6 +70,14 @@ function resolveIndex(n) {
 function priorityToInt(p) {
   const map = { low: 1, med: 2, medium: 2, high: 3 }
   return map[p] ?? 0
+}
+
+// Coerce TODOO_PORT to a safe integer before it reaches a shell-spawning call.
+// A crafted value (e.g. "4521; rm -rf ~") must never reach execFileSync as an
+// arg, and a non-numeric one falls back to the default.
+function serverPort() {
+  const p = Number(process.env.TODOO_PORT)
+  return Number.isInteger(p) && p > 0 ? p : 4521
 }
 
 /** Get local day boundaries as UTC ISO strings */
@@ -43,11 +90,12 @@ function todayBounds() {
 
 // ── default command: todo (no args) ──────────────────────────────────────────
 
-async function cmdDefault() {
+async function cmdDefault(deps = defaultDeps()) {
+  const { api } = deps
   try {
     const { tasks } = await api.get('/api/tasks?status=todo,in_progress')
     const now = new Date()
-    const { start: todayStart, end: todayEnd } = todayBounds()
+    const { end: todayEnd } = todayBounds()
 
     const overdue = tasks.filter(t => t.due_at && new Date(t.due_at) < now)
     const today = tasks.filter(t => {
@@ -65,27 +113,29 @@ async function cmdDefault() {
 
     const anyTask = overdue.length + today.length + inbox.length > 0
     if (!anyTask) {
-      console.log(pc.green('\nAll clear! No pending tasks.'))
-      writeLastList({})
+      deps.log(pc.green('\nAll clear! No pending tasks.'))
+      deps.state.writeLastList({})
       return
     }
 
     printList(sections)
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── add ───────────────────────────────────────────────────────────────────────
 
-async function cmdAdd(title, opts) {
+async function cmdAdd(title, opts, deps = defaultDeps()) {
+  const { api } = deps
   try {
     const body = { title }
     if (opts.due) {
       const iso = parseDue(opts.due)
       if (!iso) {
-        console.error(pc.red(`Could not parse date: "${opts.due}"`))
-        process.exit(1)
+        deps.error(pc.red(`Could not parse date: "${opts.due}"`))
+        deps.exit(1)
+        return
       }
       body.due_at = iso
     }
@@ -93,27 +143,30 @@ async function cmdAdd(title, opts) {
     if (opts.notes) body.notes = opts.notes
     if (opts.repeat) {
       if (!['daily', 'weekly', 'monthly'].includes(opts.repeat)) {
-        console.error(pc.red(`Invalid repeat: "${opts.repeat}". Use daily | weekly | monthly.`))
-        process.exit(1)
+        deps.error(pc.red(`Invalid repeat: "${opts.repeat}". Use daily | weekly | monthly.`))
+        deps.exit(1)
+        return
       }
       if (!body.due_at) {
-        console.error(pc.red('A repeating task needs a due date — add -d "tomorrow 9am".'))
-        process.exit(1)
+        deps.error(pc.red('A repeating task needs a due date — add -d "tomorrow 9am".'))
+        deps.exit(1)
+        return
       }
       body.repeat = opts.repeat
     }
 
     const { task } = await api.post('/api/tasks', body)
     const dueStr = task.due_at ? ` due ${formatDue(task.due_at)}` : ''
-    console.log(pc.green(`Added: "${task.title}"${dueStr} (id ${task.id})`) )
+    deps.log(pc.green(`Added: "${task.title}"${dueStr} (id ${task.id})`))
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── list --all ────────────────────────────────────────────────────────────────
 
-async function cmdList(opts) {
+async function cmdList(opts, deps = defaultDeps()) {
+  const { api } = deps
   try {
     if (opts.all) {
       const { tasks: all } = await api.get('/api/tasks')
@@ -127,90 +180,97 @@ async function cmdList(opts) {
         { label: 'Done (last 20)', tasks: done },
       ])
     } else {
-      await cmdDefault()
+      await cmdDefault(deps)
     }
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── done ──────────────────────────────────────────────────────────────────────
 
-async function cmdDone(n) {
+async function cmdDone(n, deps = defaultDeps()) {
+  const { api } = deps
   try {
-    const id = resolveIndex(n)
+    const id = resolveIndex(n, deps)
     const { task } = await api.patch(`/api/tasks/${id}`, { status: 'done' })
-    writeLastAction({ type: 'done', task_id: id })
-    console.log(pc.green(`Done: "${task.title}"`))
+    deps.state.writeLastAction({ type: 'done', task_id: id })
+    deps.log(pc.green(`Done: "${task.title}"`))
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── start ─────────────────────────────────────────────────────────────────────
 
-async function cmdStart(n) {
+async function cmdStart(n, deps = defaultDeps()) {
+  const { api } = deps
   try {
-    const id = resolveIndex(n)
+    const id = resolveIndex(n, deps)
     const { task } = await api.patch(`/api/tasks/${id}`, { status: 'in_progress' })
-    console.log(pc.cyan(`Started: "${task.title}"`))
+    deps.log(pc.cyan(`Started: "${task.title}"`))
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── rm ────────────────────────────────────────────────────────────────────────
 
-async function cmdRm(n) {
+async function cmdRm(n, deps = defaultDeps()) {
+  const { api } = deps
   try {
-    const id = resolveIndex(n)
+    const id = resolveIndex(n, deps)
     const { task } = await api.delete(`/api/tasks/${id}`)
-    writeLastAction({ type: 'delete', task_id: id })
-    console.log(pc.dim(`Deleted: "${task.title}"`))
-    console.log(pc.dim('Run `todo undo` to restore.'))
+    deps.state.writeLastAction({ type: 'delete', task_id: id })
+    deps.log(pc.dim(`Deleted: "${task.title}"`))
+    deps.log(pc.dim('Run `todo undo` to restore.'))
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── undo ──────────────────────────────────────────────────────────────────────
 
-async function cmdUndo() {
+async function cmdUndo(deps = defaultDeps()) {
+  const { api } = deps
   try {
-    const action = readLastAction()
+    const action = deps.state.readLastAction()
     if (!action || !action.type) {
-      console.log(pc.yellow('Nothing to undo.'))
+      deps.log(pc.yellow('Nothing to undo.'))
       return
     }
     if (action.type === 'delete') {
       const { task } = await api.post(`/api/tasks/${action.task_id}/restore`)
-      clearLastAction()
-      console.log(pc.green(`Restored: "${task.title}"`))
+      deps.state.clearLastAction()
+      deps.log(pc.green(`Restored: "${task.title}"`))
     } else if (action.type === 'done') {
       const { task } = await api.patch(`/api/tasks/${action.task_id}`, { status: 'todo' })
-      clearLastAction()
-      console.log(pc.green(`Marked todo again: "${task.title}"`))
+      deps.state.clearLastAction()
+      deps.log(pc.green(`Marked todo again: "${task.title}"`))
     } else {
-      console.log(pc.yellow('Nothing to undo.'))
+      deps.log(pc.yellow('Nothing to undo.'))
     }
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── focus ─────────────────────────────────────────────────────────────────────
 
-async function cmdFocus(n, opts) {
+async function cmdFocus(n, opts, deps = defaultDeps()) {
+  const { api } = deps
   const minutes = parseInt(opts.time ?? 25, 10)
   const duration_sec = minutes * 60
 
   let task_id
   try {
-    task_id = resolveIndex(n)
+    task_id = resolveIndex(n, deps)
   } catch {
     // resolveIndex already exits on error
     return
   }
+  // resolveIndex returns undefined (and has called exit) when there is no list
+  if (task_id === undefined) return
 
   let session
   try {
@@ -218,10 +278,12 @@ async function cmdFocus(n, opts) {
     session = result.session
   } catch (err) {
     if (err.status === 409) {
-      console.error(pc.yellow('A focus session is already active. Run `todo server status` or check the web app.'))
-      process.exit(1)
+      deps.error(pc.yellow('A focus session is already active. Run `todo server status` or check the web app.'))
+      deps.exit(1)
+      return
     }
-    handleError(err)
+    handleError(err, deps)
+    return
   }
 
   const started = new Date(session.started_at).getTime()
@@ -229,7 +291,7 @@ async function cmdFocus(n, opts) {
   const BAR_WIDTH = 30
 
   function renderBar() {
-    const now = Date.now()
+    const now = deps.now()
     const elapsed = now - started
     const remaining = Math.max(0, planned - elapsed)
     const remainSec = Math.ceil(remaining / 1000)
@@ -239,118 +301,136 @@ async function cmdFocus(n, opts) {
     const bar = pc.green('█'.repeat(filled)) + pc.dim('░'.repeat(empty))
     const mins = String(Math.floor(remainSec / 60)).padStart(2, '0')
     const secs = String(remainSec % 60).padStart(2, '0')
-    process.stdout.write(`\r[${bar}] ${mins}:${secs} remaining `)
+    deps.write(`\r[${bar}] ${mins}:${secs} remaining `)
     return remaining <= 0
   }
 
-  console.log(pc.cyan(`\nFocus: ${minutes}m on task #${n}. Press Ctrl-C to stop.\n`))
+  deps.log(pc.cyan(`\nFocus: ${minutes}m on task #${n}. Press Ctrl-C to stop.\n`))
 
   let interval
   let stopped = false
 
+  const onSigint = async () => {
+    await stop(false)
+    deps.exit(0)
+  }
+
   async function stop(completed) {
     if (stopped) return
     stopped = true
-    clearInterval(interval)
-    process.stdout.write('\n')
+    deps.clearTimer(interval)
+    deps.offSignal('SIGINT', onSigint)
+    deps.write('\n')
     try {
       await api.post(`/api/focus/${session.id}/stop`, { completed })
-    } catch {}
+    } catch (err) {
+      // Best-effort cleanup, but a failed stop leaves a phantom active
+      // session — warn so the user knows to clear it from the web app.
+      deps.error(pc.dim(`(could not record stop: ${err.message})`))
+    }
     if (completed) {
-      process.stdout.write('\x07') // bell
-      console.log(pc.green('\nFocus session complete!'))
-      console.log(pc.dim(`Run \`todo done ${n}\` to mark the task done.`))
+      deps.write('\x07') // bell
+      deps.log(pc.green('\nFocus session complete!'))
+      deps.log(pc.dim(`Run \`todo done ${n}\` to mark the task done.`))
     } else {
-      console.log(pc.yellow('\nFocus session stopped.'))
+      deps.log(pc.yellow('\nFocus session stopped.'))
     }
   }
 
-  process.on('SIGINT', async () => {
-    await stop(false)
-    process.exit(0)
-  })
+  deps.onSignal('SIGINT', onSigint)
 
-  interval = setInterval(async () => {
+  interval = deps.setTimer(async () => {
     const done = renderBar()
     if (done) {
       await stop(true)
-      process.exit(0)
+      deps.exit(0)
     }
   }, 1000)
 
   // Initial render
   renderBar()
+
+  // Exposed for tests so the interval tick / stop can be driven directly.
+  return { renderBar, stop }
 }
 
 // ── open ──────────────────────────────────────────────────────────────────────
 
-async function cmdOpen() {
+async function cmdOpen(deps = defaultDeps()) {
+  const { api } = deps
   try {
     await api.get('/api/health')
-    execSync(`open http://127.0.0.1:${process.env.TODOO_PORT || 4521}`)
+    deps.exec('open', [`http://127.0.0.1:${serverPort()}`])
   } catch (err) {
-    handleError(err)
+    handleError(err, deps)
   }
 }
 
 // ── server ────────────────────────────────────────────────────────────────────
 
-async function cmdServer(action) {
-  const { readServerPid } = await import('./state.js')
+async function cmdServer(action, deps = defaultDeps()) {
+  const { api } = deps
 
   if (action === 'start') {
     const { serverIsUp, ensureServer } = await import('./api.js')
     if (await serverIsUp()) {
-      console.log(pc.green('Server is already running.'))
+      deps.log(pc.green('Server is already running.'))
     } else {
       await ensureServer() // exits with an error message if it cannot start
-      console.log(pc.green('Server started.'))
+      deps.log(pc.green('Server started.'))
     }
   } else if (action === 'stop') {
     let killed = false
-    const pid = readServerPid()
+    const pid = deps.state.readServerPid()
     if (pid) {
       try {
-        process.kill(pid, 'SIGTERM')
+        deps.kill(pid, 'SIGTERM')
         killed = true
-        console.log(pc.dim(`Stopped server (pid ${pid}).`))
-      } catch {}
+        deps.log(pc.dim(`Stopped server (pid ${pid}).`))
+      } catch (err) {
+        // Stale PID (process already gone) — fall through to the lsof scan.
+        deps.error(pc.dim(`(pid ${pid} not running: ${err.message})`))
+      }
     }
     if (!killed) {
       try {
-        const pids = execSync(`lsof -ti :${process.env.TODOO_PORT || 4521}`).toString().trim()
+        const pids = deps.exec('lsof', ['-ti', `:${serverPort()}`]).toString().trim()
         if (pids) {
           pids.split('\n').forEach(p => {
-            try { process.kill(parseInt(p, 10), 'SIGTERM') } catch {}
+            try { deps.kill(parseInt(p, 10), 'SIGTERM') } catch (err) {
+              deps.error(pc.dim(`(could not kill pid ${p}: ${err.message})`))
+            }
           })
-          console.log(pc.dim('Stopped server.'))
+          deps.log(pc.dim('Stopped server.'))
         } else {
-          console.log(pc.yellow('No server process found.'))
+          deps.log(pc.yellow('No server process found.'))
         }
       } catch {
-        console.log(pc.yellow('No server process found.'))
+        deps.log(pc.yellow('No server process found.'))
       }
     }
   } else if (action === 'status') {
     try {
-      const { ok, version } = await api.get('/api/health')
-      console.log(pc.green(`Server running — version ${version}`))
+      const { version } = await api.get('/api/health')
+      deps.log(pc.green(`Server running — version ${version}`))
     } catch {
-      console.log(pc.yellow('Server is not running.'))
+      deps.log(pc.yellow('Server is not running.'))
     }
   } else {
-    console.error(pc.red(`Unknown server action: ${action}. Use start|stop|status.`))
-    process.exit(1)
+    deps.error(pc.red(`Unknown server action: ${action}. Use start|stop|status.`))
+    deps.exit(1)
   }
 }
 
 // ── wire up commander ─────────────────────────────────────────────────────────
+// Commander passes (…args, command); the handlers default `deps`, so the extra
+// command object is harmless — none of them read it.
 
 program
   .name('todo')
   .description('TodoDesu CLI')
   .version('0.1.0')
-  .action(cmdDefault)
+  .action(() => cmdDefault())
 
 program
   .command('add <title>')
@@ -359,48 +439,63 @@ program
   .option('-p, --priority <level>', 'Priority: low | med | high')
   .option('-n, --notes <text>', 'Notes')
   .option('-r, --repeat <rule>', 'Repeat: daily | weekly | monthly (requires --due)')
-  .action(cmdAdd)
+  .action((title, opts) => cmdAdd(title, opts))
 
 program
   .command('list')
   .description('List tasks (use --all for all statuses)')
   .option('--all', 'Show all tasks grouped by status')
-  .action(cmdList)
+  .action((opts) => cmdList(opts))
 
 program
   .command('done <n>')
   .description('Mark task <n> (from last list) as done')
-  .action(cmdDone)
+  .action((n) => cmdDone(n))
 
 program
   .command('start <n>')
   .description('Mark task <n> as in_progress')
-  .action(cmdStart)
+  .action((n) => cmdStart(n))
 
 program
   .command('rm <n>')
   .description('Soft-delete task <n>')
-  .action(cmdRm)
+  .action((n) => cmdRm(n))
 
 program
   .command('undo')
   .description('Undo the last done or rm action')
-  .action(cmdUndo)
+  .action(() => cmdUndo())
 
 program
   .command('focus <n>')
   .description('Start a focus session on task <n>')
   .option('-t, --time <minutes>', 'Duration in minutes (default 25)')
-  .action(cmdFocus)
+  .action((n, opts) => cmdFocus(n, opts))
 
 program
   .command('open')
   .description('Open the web UI in the browser')
-  .action(cmdOpen)
+  .action(() => cmdOpen())
 
 program
   .command('server <action>')
   .description('Manage the server: start|stop|status')
-  .action(cmdServer)
+  .action((action) => cmdServer(action))
 
-export { program }
+export {
+  program,
+  resolveIndex,
+  priorityToInt,
+  todayBounds,
+  cmdDefault,
+  cmdAdd,
+  cmdList,
+  cmdDone,
+  cmdStart,
+  cmdRm,
+  cmdUndo,
+  cmdFocus,
+  cmdOpen,
+  cmdServer,
+}

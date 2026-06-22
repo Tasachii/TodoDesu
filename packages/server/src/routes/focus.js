@@ -6,6 +6,7 @@ function sessionById(db, id) {
 
 export default async function focusRoutes(app) {
   const { db } = app
+  const clock = app.now ?? (() => new Date())
 
   app.post(
     '/api/focus/start',
@@ -47,7 +48,7 @@ export default async function focusRoutes(app) {
         .prepare(
           'INSERT INTO focus_sessions (task_id, planned_sec, started_at) VALUES (?, ?, ?)'
         )
-        .run(task_id, duration_sec, new Date().toISOString())
+        .run(task_id, duration_sec, clock().toISOString())
       reply.code(201)
       return { session: sessionById(db, info.lastInsertRowid) }
     }
@@ -69,10 +70,13 @@ export default async function focusRoutes(app) {
       if (!session) return notFound(reply)
       if (session.ended_at) return { session } // idempotent
 
-      const now = new Date()
-      const elapsed = Math.min(
-        Math.round((now - new Date(session.started_at)) / 1000),
-        session.planned_sec
+      const now = clock()
+      // Clamp at 0 as well as planned_sec: a backwards server clock would
+      // otherwise write a negative duration_sec and corrupt stats.focus_sec
+      // sums. Mirrors the standalone engine (web/src/api/local.js).
+      const elapsed = Math.max(
+        0,
+        Math.min(Math.round((now - new Date(session.started_at)) / 1000), session.planned_sec)
       )
       db.prepare(
         'UPDATE focus_sessions SET ended_at = ?, duration_sec = ?, completed = ? WHERE id = ?'

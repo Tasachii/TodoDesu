@@ -97,7 +97,7 @@ export default function SearchOverlay({ open, onClose }) {
             >
               {needle === '' ? (
                 <p className="py-8 text-center font-display text-sm italic text-stone-300 dark:text-stone-600">
-                  Search everything you've ever added.
+                  Search everything you&apos;ve ever added.
                 </p>
               ) : matches.length === 0 ? (
                 <p className="py-8 text-center font-display text-sm italic text-stone-300 dark:text-stone-600">

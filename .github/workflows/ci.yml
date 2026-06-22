@@ -15,7 +15,11 @@ jobs:
           node-version: '23'
           cache: npm
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - run: npm test
+      - name: Coverage (thresholds enforced)
+        run: npm run test:coverage
       - run: npm run build
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium

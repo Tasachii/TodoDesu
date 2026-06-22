@@ -1,4 +1,8 @@
 import { taskById, nextSortOrder, notFound } from '../db/queries.js'
+import { nextDueAt } from '@todoo/core'
+
+// Re-exported for tests that import it from this route module.
+export { nextDueAt }
 
 const taskBodyProps = {
   title: { type: 'string', minLength: 1, maxLength: 500 },
@@ -9,29 +13,9 @@ const taskBodyProps = {
   repeat: { enum: ['daily', 'weekly', 'monthly', null] },
 }
 
-// The next occurrence keeps the time of day and always lands in the future —
-// completing an overdue daily task schedules tomorrow, not a stack of misses.
-// Monthly keeps the day-of-month, clamping in shorter months (a task due the
-// 31st falls on Feb 28, then the 28th onward) — it never overflows into the
-// next month the way raw setMonth would (Jan 31 + 1 month = Mar 3).
-export function nextDueAt(dueIso, repeat, now = new Date()) {
-  const d = new Date(dueIso)
-  const anchorDay = d.getDate()
-  do {
-    if (repeat === 'daily') d.setDate(d.getDate() + 1)
-    else if (repeat === 'weekly') d.setDate(d.getDate() + 7)
-    else {
-      d.setDate(1)
-      d.setMonth(d.getMonth() + 1)
-      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-      d.setDate(Math.min(anchorDay, daysInMonth))
-    }
-  } while (d <= now)
-  return d.toISOString()
-}
-
 export default async function tasksRoutes(app) {
   const { db } = app
+  const now = app.now ?? (() => new Date())
 
   app.get('/api/tasks', async (req) => {
     const { status, due_after, due_before, q, deleted } = req.query
@@ -154,10 +138,10 @@ export default async function tasksRoutes(app) {
         ).run(
           fresh.title,
           fresh.notes,
-          nextDueAt(fresh.due_at, fresh.repeat),
+          nextDueAt(fresh.due_at, fresh.repeat, now()),
           fresh.priority,
           nextSortOrder(db, 'todo'),
-          new Date().toISOString(),
+          now().toISOString(),
           fresh.repeat
         )
       }

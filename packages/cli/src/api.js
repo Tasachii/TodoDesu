@@ -14,7 +14,9 @@ async function waitForServer() {
     try {
       const res = await fetch(`${BASE}/api/health`)
       if (res.ok) return true
-    } catch {}
+    } catch {
+      /* server not up yet — keep polling until the deadline */
+    }
     await new Promise(r => setTimeout(r, 150))
   }
   return false
@@ -37,7 +39,9 @@ export async function ensureServer() {
   try {
     const res = await fetch(`${BASE}/api/health`)
     if (res.ok) return
-  } catch {}
+  } catch {
+    /* not running — fall through to spawn it */
+  }
 
   // Resolve server path relative to this file
   const serverPath = new URL('../../server/src/index.js', import.meta.url).pathname

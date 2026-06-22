@@ -11,13 +11,23 @@
     "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w @todoo/server\" \"npm run dev -w @todoo/web\"",
     "build": "npm run build -w @todoo/web",
     "start": "npm run start -w @todoo/server",
-    "test": "npm run test -w @todoo/server && npm run test -w @todoo/cli && npm run test -w @todoo/web",
+    "test": "npm run test -w @todoo/core && npm run test -w @todoo/server && npm run test -w @todoo/cli && npm run test -w @todoo/web",
+    "test:coverage": "npm run test:coverage -w @todoo/core && npm run test:coverage -w @todoo/server && npm run test:coverage -w @todoo/cli && npm run test:coverage -w @todoo/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
     "cli:link": "npm link -w @todoo/cli",
     "app:sync": "npm run app:sync -w @todoo/web",
     "app:open": "npm run app:open -w @todoo/web"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "@eslint/js": "^9.39.4",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.4"
   },
   "engines": {
     "node": ">=23.4.0"

@@ -64,7 +64,7 @@ export default function TodayView() {
             <>Something went wrong loading your tasks. Try closing and reopening the app.</>
           ) : (
             <>
-              Can't reach the server — is it running? Try <code>todo server start</code>.
+              Can&apos;t reach the server — is it running? Try <code>todo server start</code>.
             </>
           )}
         </p>

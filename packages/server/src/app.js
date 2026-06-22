@@ -10,7 +10,15 @@ import backupRoutes from './routes/backup.js'
 
 export const VERSION = '0.1.0'
 
-export function buildApp({ db, logger = false } = {}) {
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+
+export function buildApp({
+  db,
+  logger = false,
+  now = () => new Date(),
+  host = '127.0.0.1',
+  token = process.env.TODOO_TOKEN || null,
+} = {}) {
   const app = Fastify({
     logger,
     // Fastify's default Ajv strips unknown body fields silently
@@ -20,6 +28,28 @@ export function buildApp({ db, logger = false } = {}) {
     ajv: { customOptions: { removeAdditional: false } },
   })
   app.decorate('db', db)
+  // Injectable clock so recurrence/focus-stop logic can be driven with a fixed
+  // time in tests; defaults to the real wall clock in production.
+  app.decorate('now', now)
+
+  // Optional LAN auth: when bound to a non-loopback host AND TODOO_TOKEN is set,
+  // require a matching bearer token on mutating API routes. Loopback (the
+  // default, and what the tests/e2e use) is never gated, so behavior there is
+  // unchanged. GET stays open so the SPA and read-only views keep working.
+  const guardLan = token && !LOOPBACK_HOSTS.has(host)
+  if (guardLan) {
+    const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+    app.addHook('onRequest', async (req, reply) => {
+      if (!req.url.startsWith('/api/') || !MUTATING.has(req.method)) return
+      const auth = req.headers.authorization || ''
+      const provided = auth.startsWith('Bearer ') ? auth.slice(7) : null
+      if (provided !== token) {
+        return reply
+          .code(401)
+          .send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid token' } })
+      }
+    })
+  }
 
   app.setErrorHandler((err, req, reply) => {
     if (err.validation) {
