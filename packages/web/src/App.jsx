@@ -76,6 +76,19 @@ export default function App() {
     setToast(null)
   }, [])
 
+  // Unrecoverable data-layer errors (e.g. a full localStorage quota in the
+  // standalone build) broadcast this event so any hook can surface a plain
+  // message through the same toast, without reaching into React context.
+  useEffect(() => {
+    const onMessage = (e) => {
+      clearTimeout(toastTimer.current)
+      setToast({ label: e.detail })
+      toastTimer.current = setTimeout(() => setToast(null), 5000)
+    }
+    window.addEventListener('tododesu:toast', onMessage)
+    return () => window.removeEventListener('tododesu:toast', onMessage)
+  }, [])
+
   return (
     <UIContext.Provider value={{ openDetail: setDetailId, showUndo, openSearch }}>
       <AppShell>

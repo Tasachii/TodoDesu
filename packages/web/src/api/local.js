@@ -90,7 +90,16 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
   data.taskSeq = Math.max(data.taskSeq, ...data.tasks.map((t) => t.id), 0)
   data.sessionSeq = Math.max(data.sessionSeq, ...data.sessions.map((s) => s.id), 0)
 
-  const persist = () => storage.setItem(STORAGE_KEY, JSON.stringify(data))
+  const persist = () => {
+    try {
+      storage.setItem(STORAGE_KEY, JSON.stringify(data))
+    } catch {
+      // A full quota (or a locked-down private-mode store) must surface as a
+      // clean error the UI can show — not a raw DOMException — otherwise the
+      // optimistic mutation just rolls back and the new task vanishes silently.
+      throw apiError('STORAGE_FULL', 'Storage is full — export a backup and remove old tasks to free space.')
+    }
+  }
   const iso = () => now().toISOString()
 
   // startup purge, same policy as the server

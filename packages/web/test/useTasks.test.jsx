@@ -171,6 +171,24 @@ describe('useTaskMutations.create / restore', () => {
     expect(qc.getQueryData(KEY)).toEqual([{ id: 1 }])
   })
 
+  it('broadcasts a toast event when a mutation fails with STORAGE_FULL', async () => {
+    const { qc, wrapper } = makeWrapper()
+    seed(qc, [])
+    const err = Object.assign(new Error('Storage is full'), { code: 'STORAGE_FULL' })
+    api.createTask.mockRejectedValue(err)
+    const spy = vi.spyOn(window, 'dispatchEvent')
+    const { result } = renderHook(() => useTaskMutations(), { wrapper })
+
+    await act(async () => {
+      await settle(result.current.create.mutateAsync({ title: 'x' }))
+    })
+
+    const evt = spy.mock.calls.map(([e]) => e).find((e) => e.type === 'tododesu:toast')
+    expect(evt).toBeTruthy()
+    expect(evt.detail).toBe('Storage is full')
+    spy.mockRestore()
+  })
+
   it('restore calls api.restoreTask', async () => {
     const { qc, wrapper } = makeWrapper()
     seed(qc, [])

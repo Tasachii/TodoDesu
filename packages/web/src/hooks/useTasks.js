@@ -15,7 +15,14 @@ export function useTaskMutations() {
     return { prev }
   }
   const common = {
-    onError: (_err, _vars, ctx) => ctx?.prev && qc.setQueryData(KEY, ctx.prev),
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(KEY, ctx.prev)
+      // A full localStorage quota can't be retried away — tell the user rather
+      // than let the optimistic row silently disappear on rollback.
+      if (err?.code === 'STORAGE_FULL' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tododesu:toast', { detail: err.message }))
+      }
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   }
   const setCache = (fn) => qc.setQueryData(KEY, (old = []) => fn(old))

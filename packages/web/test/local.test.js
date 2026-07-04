@@ -326,4 +326,17 @@ describe('settings and persistence', () => {
     const created = await reopened.createTask({ title: 'new' })
     expect(created.id).toBe(8)
   })
+
+  it('surfaces a storage-quota failure as STORAGE_FULL instead of a raw DOMException', async () => {
+    const full = {
+      getItem: () => null,
+      setItem: () => {
+        const e = new Error('exceeded the quota')
+        e.name = 'QuotaExceededError'
+        throw e
+      },
+    }
+    const limited = createLocalApi(full)
+    await expect(limited.createTask({ title: 'x' })).rejects.toMatchObject({ code: 'STORAGE_FULL' })
+  })
 })
