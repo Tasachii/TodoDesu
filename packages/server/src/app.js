@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import fastifyStatic from '@fastify/static'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { timingSafeEqual } from 'node:crypto'
 import tasksRoutes from './routes/tasks.js'
 import focusRoutes from './routes/focus.js'
 import statsRoutes from './routes/stats.js'
@@ -12,6 +13,16 @@ export const VERSION = '0.1.0'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
 
+// Constant-time bearer-token compare so a LAN attacker can't recover the token
+// byte-by-byte from response timing. Unequal lengths short-circuit before
+// timingSafeEqual (which throws on a length mismatch) — that leaks only the
+// length, not the contents, an acceptable tradeoff for a LAN token.
+function tokenMatches(provided, expected) {
+  const a = Buffer.from(String(provided))
+  const b = Buffer.from(String(expected))
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 export function buildApp({
   db,
   logger = false,
@@ -21,6 +32,10 @@ export function buildApp({
 } = {}) {
   const app = Fastify({
     logger,
+    // A whole-database backup is POSTed to /api/import as one JSON body, and
+    // Fastify's 1 MB default would 413 a heavy user's export. Raise the ceiling
+    // to 16 MB so restore keeps working as the task/session history grows.
+    bodyLimit: 16 * 1024 * 1024,
     // Fastify's default Ajv strips unknown body fields silently
     // (removeAdditional). Reject them instead so client typos surface
     // as 400 VALIDATION rather than data quietly not being saved.
@@ -42,8 +57,8 @@ export function buildApp({
     app.addHook('onRequest', async (req, reply) => {
       if (!req.url.startsWith('/api/') || !MUTATING.has(req.method)) return
       const auth = req.headers.authorization || ''
-      const provided = auth.startsWith('Bearer ') ? auth.slice(7) : null
-      if (provided !== token) {
+      const provided = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+      if (!tokenMatches(provided, token)) {
         return reply
           .code(401)
           .send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid token' } })

@@ -300,6 +300,32 @@ describe('backup', () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0].title).toBe('precious')
   })
+
+  it('accepts a backup larger than Fastify’s 1 MB default body limit', async () => {
+    // ~1.5 MB of notes on one task — without the raised bodyLimit Fastify would
+    // 413 this, silently breaking restore for anyone with a large history.
+    const big = 'x'.repeat(1_500_000)
+    const dump = {
+      app: 'todoo',
+      version: 1,
+      tasks: [
+        {
+          id: 1,
+          title: 'huge',
+          notes: big,
+          status: 'todo',
+          sort_order: 1,
+          created_at: new Date().toISOString(),
+        },
+      ],
+      focus_sessions: [],
+      settings: {},
+    }
+    const fresh = buildApp({ db: openDb(':memory:') })
+    const res = await fresh.inject({ method: 'POST', url: '/api/import', body: dump })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().imported.tasks).toBe(1)
+  })
 })
 
 describe('settings', () => {

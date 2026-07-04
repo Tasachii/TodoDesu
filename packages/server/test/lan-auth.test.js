@@ -17,15 +17,19 @@ describe('LAN auth — non-loopback host with a token', () => {
     expect(res.json().error.code).toBe('UNAUTHORIZED')
   })
 
-  it('rejects a write with the wrong token', async () => {
+  it('rejects a write with the wrong token (any length)', async () => {
     const app = lanApp()
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/tasks',
-      headers: { authorization: 'Bearer nope' },
-      body: { title: 'x' },
-    })
-    expect(res.statusCode).toBe(401)
+    // 'sekret' matches the length of 'secret', so the constant-time compare
+    // runs to completion instead of short-circuiting on the length check.
+    for (const bad of ['nope', 'sekret']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tasks',
+        headers: { authorization: `Bearer ${bad}` },
+        body: { title: 'x' },
+      })
+      expect(res.statusCode).toBe(401)
+    }
   })
 
   it('accepts a write with the correct bearer token', async () => {
