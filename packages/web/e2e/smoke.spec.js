@@ -74,7 +74,12 @@ test('focus switches to Pomodoro with the round indicator', async ({ page }) => 
 })
 
 test('completing a recurring task spawns the next occurrence', async ({ page, request }) => {
-  const due = new Date(Date.now() + 26 * 3600_000).toISOString()
+  // Due 2h ago so the task always renders (Overdue section) no matter the wall
+  // clock; completing a daily task then spawns the next occurrence within 24h,
+  // which always lands in Today or Tomorrow. A future "+26h" due date was flaky:
+  // depending on the runner's timezone and hour, the task or its spawn could
+  // overflow past the Tomorrow section and render in no section at all.
+  const due = new Date(Date.now() - 2 * 3600_000).toISOString()
   await request.post('/api/tasks', {
     data: { title: 'water the bonsai', due_at: due, repeat: 'daily' },
   })
@@ -85,8 +90,8 @@ test('completing a recurring task spawns the next occurrence', async ({ page, re
   await row.getByRole('button', { name: 'Mark as done' }).click()
   await expect(page.getByText('Task completed')).toBeVisible()
 
-  // the done task leaves Today; what remains must be the SPAWNED occurrence —
-  // an open task (its circle still says "Mark as done") that still repeats
+  // the done task leaves the open list; what remains must be the SPAWNED
+  // occurrence — an open task (its circle still says "Mark as done") that repeats
   const spawned = page.locator('li', { hasText: 'water the bonsai' })
   await expect(spawned).toHaveCount(1)
   await expect(spawned.getByRole('button', { name: 'Mark as done' })).toBeVisible()
