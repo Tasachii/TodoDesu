@@ -4,8 +4,8 @@
 @custom-variant wa (&:where([data-theme="wa"], [data-theme="wa"] *));
 
 @theme {
-  --font-sans: "Schibsted Grotesk", "Noto Sans Thai", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", "Noto Sans Thai", Georgia, serif;
+  --font-sans: "Schibsted Grotesk Variable", "Schibsted Grotesk", "Noto Sans Thai Variable", "Noto Sans Thai", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces Variable", "Fraunces", "Noto Sans Thai Variable", "Noto Sans Thai", Georgia, serif;
 
   --color-paper: #f7f5f1;
   --color-card: #fffdf9;
@@ -47,8 +47,8 @@
   --color-ink: #2c2926; /* sumi ink, never pure black */
   --color-accent: #bc3a22; /* dark vermillion — 4.9:1 on washi (AA) */
   --color-accent-bright: #e34234; /* shu-iro — fills, stamps, large marks */
-  --font-display: "Shippori Mincho", "Noto Sans Thai", Georgia, serif;
-  --font-sans: "Zen Kaku Gothic New", "Noto Sans Thai", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Shippori Mincho", "Noto Sans Thai Variable", "Noto Sans Thai", Georgia, serif;
+  --font-sans: "Zen Kaku Gothic New", "Noto Sans Thai Variable", "Noto Sans Thai", ui-sans-serif, system-ui, sans-serif;
 }
 [data-theme="wa"] ::selection {
   background: #f3c9bd;

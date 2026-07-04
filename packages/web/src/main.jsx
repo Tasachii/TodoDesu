@@ -4,6 +4,18 @@ import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App.jsx'
 import { isStandalone } from './api/client.js'
+
+// Self-hosted fonts — no Google Fonts CDN, so the standalone build makes no
+// third-party request and works fully offline. Variable families cover the
+// Latin + Thai UI (weight ranges). The two Japanese families are only used by
+// the 和 theme for a handful of decorative glyphs, so they are hand-subset to
+// those glyphs (see src/fonts/japanese.css) rather than shipping full CJK.
+import '@fontsource-variable/fraunces/standard.css'
+import '@fontsource-variable/fraunces/standard-italic.css'
+import '@fontsource-variable/schibsted-grotesk/index.css'
+import '@fontsource-variable/noto-sans-thai/index.css'
+import './fonts/japanese.css'
+
 import './index.css'
 
 // In standalone mode the user's data lives in browser storage — ask the

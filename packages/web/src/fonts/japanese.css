@@ -1,0 +1,56 @@
+/* Japanese faces for the 和 (wa) theme, self-hosted and subset to only the ~13
+   glyphs the UI actually renders (集中, 完, トドデス, 今日, 暦, 和 …). Subset from the
+   upstream OFL fonts with pyftsubset, so each file is ~2–3 kB instead of the
+   multi-hundred-KB full CJK families. The unicode-range keeps these off every
+   non-Japanese screen. Family names must match the [data-theme="wa"] block in
+   index.css. */
+
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./zen-kaku-gothic-new-jp-400.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./zen-kaku-gothic-new-jp-500.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./zen-kaku-gothic-new-jp-700.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
+
+@font-face {
+  font-family: "Shippori Mincho";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./shippori-mincho-jp-500.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
+@font-face {
+  font-family: "Shippori Mincho";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./shippori-mincho-jp-600.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
+@font-face {
+  font-family: "Shippori Mincho";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./shippori-mincho-jp-700.woff2") format("woff2");
+  unicode-range: U+30B9, U+30C7-30C9, U+30DC, U+30FC, U+4E2D, U+4ECA, U+548C, U+5B8C, U+65E5, U+66A6, U+96C6;
+}
