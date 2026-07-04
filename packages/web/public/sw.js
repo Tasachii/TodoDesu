@@ -1,6 +1,9 @@
 // Network-first for everything except /api (never cached).
 // Falls back to cache when offline, and to index.html for navigations.
-const CACHE = 'todoo-v1'
+// Bump this version on a release to evict the previous cache (the activate
+// handler deletes every cache whose name isn't CACHE) so stale hashed chunks
+// from earlier builds don't accumulate.
+const CACHE = 'todoo-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 
