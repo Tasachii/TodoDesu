@@ -221,12 +221,18 @@ export default function FocusView() {
   const handleEndBreak = useCallback(() => {
     if (endBreak() && breakMode === 'pomodoro') setFinished(null)
   }, [endBreak, breakMode])
+  // End the break when its deadline passes. A one-shot timer (rather than
+  // reacting to the ticking clock) keeps the state update out of the effect
+  // body; if the tab was suspended past the deadline the overdue timer fires on
+  // resume, and endBreak's own guard keeps it idempotent.
   useEffect(() => {
-    if (breakUntil && breakRemaining <= 0) {
+    if (!breakUntil) return
+    const id = setTimeout(() => {
       chime()
       handleEndBreak()
-    }
-  }, [breakUntil, breakRemaining, handleEndBreak])
+    }, Math.max(0, breakUntil - Date.now()))
+    return () => clearTimeout(id)
+  }, [breakUntil, handleEndBreak])
 
   const focusedMin = Math.round((stats?.focus_sec ?? 0) / 60)
 

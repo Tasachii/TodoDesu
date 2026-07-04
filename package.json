@@ -13,7 +13,7 @@
     "start": "npm run start -w @todoo/server",
     "test": "npm run test -w @todoo/core && npm run test -w @todoo/server && npm run test -w @todoo/cli && npm run test -w @todoo/web",
     "test:coverage": "npm run test:coverage -w @todoo/core && npm run test:coverage -w @todoo/server && npm run test:coverage -w @todoo/cli && npm run test:coverage -w @todoo/web",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "cli:link": "npm link -w @todoo/cli",
     "app:sync": "npm run app:sync -w @todoo/web",

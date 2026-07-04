@@ -22,10 +22,10 @@ export default function QuickAdd() {
   // Detect natural-language dates while typing ("pay rent tomorrow 6pm").
   // The parser is its own lazy chunk, fetched on the first keystroke.
   useEffect(() => {
-    if (!title.trim()) {
-      setDetected(null)
-      return
-    }
+    // Clearing an emptied field is handled in the change handler; this effect
+    // only runs the debounced async detection, so it never calls setState
+    // synchronously in its body (which would trigger a cascading render).
+    if (!title.trim()) return
     let alive = true
     const t = setTimeout(async () => {
       const { detectDue } = await import('../lib/quickdate.js')
@@ -75,7 +75,11 @@ export default function QuickAdd() {
         <input
           ref={inputRef}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value
+            setTitle(v)
+            if (!v.trim()) setDetected(null) // clear the date chip the instant the field empties
+          }}
           placeholder="Add a task — try “pay rent tomorrow 6pm”"
           enterKeyHint="done"
           className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-stone-400 dark:placeholder:text-stone-500"
