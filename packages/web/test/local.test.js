@@ -33,7 +33,16 @@ describe('tasks', () => {
 
   it('rejects empty titles', async () => {
     await expect(api.createTask({ title: '' })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(api.createTask({ title: ' \t\n ' })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(api.createTask({})).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+
+  it('rejects a whitespace-only PATCH title without changing the task', async () => {
+    const task = await api.createTask({ title: 'keep me' })
+    await expect(api.patchTask(task.id, { title: '   ' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    })
+    expect((await api.tasks())[0].title).toBe('keep me')
   })
 
   it('rejects out-of-bounds fields like the server schemas do', async () => {
@@ -338,5 +347,61 @@ describe('settings and persistence', () => {
     }
     const limited = createLocalApi(full)
     await expect(limited.createTask({ title: 'x' })).rejects.toMatchObject({ code: 'STORAGE_FULL' })
+    expect(await limited.tasks()).toEqual([])
+  })
+
+  it('leaves memory and persisted data unchanged when any mutator cannot persist', async () => {
+    const seed = memoryStorage()
+    const fixedNow = () => new Date('2026-07-11T00:00:00.000Z')
+    const seeded = createLocalApi(seed, fixedNow)
+    const task = await seeded.createTask({ title: 'keep', due_at: new Date().toISOString() })
+    const deleted = await seeded.createTask({ title: 'deleted' })
+    await seeded.deleteTask(deleted.id)
+    const session = await seeded.focusStart({ task_id: task.id, duration_sec: 60 })
+    await seeded.focusStop(session.id, false)
+    await seeded.saveSettings({ theme: 'dark' })
+    const backup = await seeded.exportData()
+    const baseline = seed.dump()
+
+    let failWrites = true
+    const failing = {
+      getItem: seed.getItem,
+      setItem(key, value) {
+        if (failWrites) throw new Error('disk full')
+        seed.setItem(key, value)
+      },
+    }
+    const limited = createLocalApi(failing, fixedNow)
+    const assertAtomic = async (operation) => {
+      const before = await limited.exportData()
+      await expect(operation()).rejects.toMatchObject({ code: 'STORAGE_FULL' })
+      expect(await limited.exportData()).toEqual(before)
+      expect(seed.dump()).toBe(baseline)
+    }
+
+    await assertAtomic(() => limited.createTask({ title: 'new' }))
+    await assertAtomic(() => limited.patchTask(task.id, { title: 'changed' }))
+    await assertAtomic(() => limited.deleteTask(task.id))
+    await assertAtomic(() => limited.restoreTask(deleted.id))
+    await assertAtomic(() => limited.focusStart({ duration_sec: 60 }))
+    const activeStore = memoryStorage()
+    const activeSeed = createLocalApi(activeStore, fixedNow)
+    const active = await activeSeed.focusStart({ duration_sec: 60 })
+    let activeFails = true
+    const activeLimited = createLocalApi({
+      getItem: activeStore.getItem,
+      setItem(key, value) {
+        if (activeFails) throw new Error('disk full')
+        activeStore.setItem(key, value)
+      },
+    }, fixedNow)
+    const activeBefore = await activeLimited.exportData()
+    await expect(activeLimited.focusStop(active.id, true)).rejects.toMatchObject({ code: 'STORAGE_FULL' })
+    expect(await activeLimited.exportData()).toEqual(activeBefore)
+    await assertAtomic(() => limited.importData({ ...backup, tasks: [] }))
+    await assertAtomic(() => limited.saveSettings({ theme: 'light' }))
+
+    failWrites = false
+    activeFails = false
   })
 })

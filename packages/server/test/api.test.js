@@ -39,9 +39,31 @@ describe('tasks CRUD', () => {
     expect(empty.statusCode).toBe(400)
     expect(empty.json().error.code).toBe('VALIDATION')
 
+    const whitespace = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      body: { title: ' \t\n ' },
+    })
+    expect(whitespace.statusCode).toBe(400)
+    expect(whitespace.json().error.code).toBe('VALIDATION')
+
     const unknown = await app.inject({ method: 'POST', url: '/api/tasks', body: { title: 'x', nope: 1 } })
     expect(unknown.statusCode).toBe(400)
     expect(unknown.json().error.code).toBe('VALIDATION')
+  })
+
+  it('rejects a whitespace-only PATCH title without changing the task', async () => {
+    const task = await createTask({ title: 'keep me' })
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${task.id}`,
+      body: { title: '   ' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error.code).toBe('VALIDATION')
+
+    const stored = await app.inject({ method: 'GET', url: `/api/tasks/${task.id}` })
+    expect(stored.json().task.title).toBe('keep me')
   })
 
   it('lists with status and due range filters', async () => {

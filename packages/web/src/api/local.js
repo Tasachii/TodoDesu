@@ -45,8 +45,13 @@ function validateFields(body) {
   ) {
     throw apiError('VALIDATION', 'priority must be an integer between 0 and 3')
   }
-  if ('title' in body && typeof body.title === 'string' && body.title.trim().length > 500) {
-    throw apiError('VALIDATION', 'title too long (max 500 chars)')
+  if ('title' in body && typeof body.title === 'string') {
+    if (body.title.trim().length === 0) {
+      throw apiError('VALIDATION', 'title must not be blank')
+    }
+    if (body.title.trim().length > 500) {
+      throw apiError('VALIDATION', 'title too long (max 500 chars)')
+    }
   }
 }
 
@@ -90,9 +95,9 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
   data.taskSeq = Math.max(data.taskSeq, ...data.tasks.map((t) => t.id), 0)
   data.sessionSeq = Math.max(data.sessionSeq, ...data.sessions.map((s) => s.id), 0)
 
-  const persist = () => {
+  const persist = (snapshot = data) => {
     try {
-      storage.setItem(STORAGE_KEY, JSON.stringify(data))
+      storage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
     } catch {
       // A full quota (or a locked-down private-mode store) must surface as a
       // clean error the UI can show — not a raw DOMException — otherwise the
@@ -104,17 +109,29 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
 
   // startup purge, same policy as the server
   const cutoff = new Date(now().getTime() - PURGE_AFTER_DAYS * 24 * 3600 * 1000).toISOString()
-  const before = data.tasks.length
-  data.tasks = data.tasks.filter((t) => !t.deleted_at || t.deleted_at >= cutoff)
-  if (data.tasks.length !== before) persist()
+  const retainedTasks = data.tasks.filter((t) => !t.deleted_at || t.deleted_at >= cutoff)
+  if (retainedTasks.length !== data.tasks.length) {
+    const purged = { ...data, tasks: retainedTasks }
+    persist(purged)
+    data = purged
+  }
 
-  const live = () => data.tasks.filter((t) => !t.deleted_at)
-  const taskById = (id) => data.tasks.find((t) => t.id === Number(id)) ?? null
-  const nextSortOrder = (status) =>
-    Math.max(0, ...live().filter((t) => t.status === status).map((t) => t.sort_order)) + 1
+  const commit = (mutate) => {
+    const draft = JSON.parse(JSON.stringify(data))
+    const result = mutate(draft)
+    persist(draft)
+    data = draft
+    return result
+  }
 
-  const requireTask = (id) => {
-    const task = taskById(id)
+  const live = (snapshot = data) => snapshot.tasks.filter((t) => !t.deleted_at)
+  const taskById = (id, snapshot = data) =>
+    snapshot.tasks.find((t) => t.id === Number(id)) ?? null
+  const nextSortOrder = (status, snapshot = data) =>
+    Math.max(0, ...live(snapshot).filter((t) => t.status === status).map((t) => t.sort_order)) + 1
+
+  const requireTask = (id, snapshot = data) => {
+    const task = taskById(id, snapshot)
     if (!task || task.deleted_at) throw apiError('NOT_FOUND', 'Not found')
     return task
   }
@@ -139,76 +156,82 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
       }
       validateFields({ status, priority, repeat })
       if (repeat && !due_at) throw apiError('VALIDATION', 'repeat requires a due date')
-      const t = iso()
-      const task = {
-        id: ++data.taskSeq,
-        title: title.trim(),
-        notes,
-        status,
-        due_at,
-        priority,
-        sort_order: nextSortOrder(status),
-        created_at: t,
-        completed_at: status === 'done' ? t : null,
-        deleted_at: null,
-        repeat,
-      }
-      data.tasks.push(task)
-      persist()
-      return task
+      return commit((draft) => {
+        const t = iso()
+        const task = {
+          id: ++draft.taskSeq,
+          title: title.trim(),
+          notes,
+          status,
+          due_at,
+          priority,
+          sort_order: nextSortOrder(status, draft),
+          created_at: t,
+          completed_at: status === 'done' ? t : null,
+          deleted_at: null,
+          repeat,
+        }
+        draft.tasks.push(task)
+        return task
+      })
     },
 
     async patchTask(id, body = {}) {
-      const task = requireTask(id)
+      const currentTask = requireTask(id)
       validateFields(body)
-      const resultingRepeat = 'repeat' in body ? body.repeat : task.repeat
-      const resultingDue = 'due_at' in body ? body.due_at : task.due_at
+      const resultingRepeat = 'repeat' in body ? body.repeat : currentTask.repeat
+      const resultingDue = 'due_at' in body ? body.due_at : currentTask.due_at
       if (resultingRepeat && !resultingDue) {
         throw apiError('VALIDATION', 'repeat requires a due date')
       }
-      const wasDone = task.status === 'done'
-      for (const key of ['title', 'notes', 'due_at', 'priority', 'sort_order', 'repeat']) {
-        if (key in body) task[key] = body[key]
-      }
-      if ('title' in body && typeof task.title === 'string') task.title = task.title.trim()
-      if ('status' in body && body.status !== task.status) {
-        task.status = body.status
-        task.completed_at = body.status === 'done' ? iso() : null
-        if (!('sort_order' in body)) task.sort_order = nextSortOrder(body.status)
-      }
-      // recurring: completing a repeating task spawns its next occurrence
-      if (!wasDone && task.status === 'done' && task.repeat && task.due_at) {
-        data.tasks.push({
-          id: ++data.taskSeq,
-          title: task.title,
-          notes: task.notes,
-          status: 'todo',
-          due_at: nextDueAt(task.due_at, task.repeat, now()),
-          priority: task.priority,
-          sort_order: nextSortOrder('todo'),
-          created_at: iso(),
-          completed_at: null,
-          deleted_at: null,
-          repeat: task.repeat,
-        })
-      }
-      persist()
-      return task
+      return commit((draft) => {
+        const task = requireTask(id, draft)
+        const wasDone = task.status === 'done'
+        for (const key of ['title', 'notes', 'due_at', 'priority', 'sort_order', 'repeat']) {
+          if (key in body) task[key] = body[key]
+        }
+        if ('title' in body) task.title = task.title.trim()
+        if ('status' in body && body.status !== task.status) {
+          task.status = body.status
+          task.completed_at = body.status === 'done' ? iso() : null
+          if (!('sort_order' in body)) task.sort_order = nextSortOrder(body.status, draft)
+        }
+        if (!wasDone && task.status === 'done' && task.repeat && task.due_at) {
+          draft.tasks.push({
+            id: ++draft.taskSeq,
+            title: task.title,
+            notes: task.notes,
+            status: 'todo',
+            due_at: nextDueAt(task.due_at, task.repeat, now()),
+            priority: task.priority,
+            sort_order: nextSortOrder('todo', draft),
+            created_at: iso(),
+            completed_at: null,
+            deleted_at: null,
+            repeat: task.repeat,
+          })
+        }
+        return task
+      })
     },
 
     async deleteTask(id) {
-      const task = requireTask(id)
-      task.deleted_at = iso()
-      persist()
-      return task
+      requireTask(id)
+      return commit((draft) => {
+        const task = requireTask(id, draft)
+        task.deleted_at = iso()
+        return task
+      })
     },
 
     async restoreTask(id) {
       const task = taskById(id)
       if (!task || !task.deleted_at) throw apiError('NOT_FOUND', 'No deleted task with that id')
-      task.deleted_at = null
-      persist()
-      return task
+      return commit((draft) => {
+        const restored = taskById(id, draft)
+        restored.deleted_at = null
+        return restored
+      })
     },
 
     async focusStart({ task_id = null, duration_sec } = {}) {
@@ -218,43 +241,44 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
       if (data.sessions.some((s) => !s.ended_at)) {
         throw apiError('CONFLICT', 'A focus session is already active')
       }
-      if (task_id != null) {
-        const task = requireTask(task_id)
-        if (task.status === 'todo') {
-          task.status = 'in_progress'
-          task.sort_order = nextSortOrder('in_progress')
+      if (task_id != null) requireTask(task_id)
+      return commit((draft) => {
+        if (task_id != null) {
+          const task = requireTask(task_id, draft)
+          if (task.status === 'todo') {
+            task.status = 'in_progress'
+            task.sort_order = nextSortOrder('in_progress', draft)
+          }
         }
-      }
-      const session = {
-        id: ++data.sessionSeq,
-        task_id,
-        planned_sec: duration_sec,
-        started_at: iso(),
-        ended_at: null,
-        duration_sec: null,
-        completed: 0,
-      }
-      data.sessions.push(session)
-      persist()
-      return session
+        const session = {
+          id: ++draft.sessionSeq,
+          task_id,
+          planned_sec: duration_sec,
+          started_at: iso(),
+          ended_at: null,
+          duration_sec: null,
+          completed: 0,
+        }
+        draft.sessions.push(session)
+        return session
+      })
     },
 
     async focusStop(id, completed) {
       const session = data.sessions.find((s) => s.id === Number(id))
       if (!session) throw apiError('NOT_FOUND', 'Not found')
       if (session.ended_at) return session // idempotent
-      const t = now()
-      session.ended_at = t.toISOString()
-      // Clamped at 0 too (deliberate divergence from the server): phone clocks
-      // jump backwards far more often than server clocks, and a negative
-      // duration would corrupt the stats sums.
-      session.duration_sec = Math.max(
-        0,
-        Math.min(Math.round((t - new Date(session.started_at)) / 1000), session.planned_sec)
-      )
-      session.completed = completed ? 1 : 0
-      persist()
-      return session
+      return commit((draft) => {
+        const stopped = draft.sessions.find((s) => s.id === Number(id))
+        const t = now()
+        stopped.ended_at = t.toISOString()
+        stopped.duration_sec = Math.max(
+          0,
+          Math.min(Math.round((t - new Date(stopped.started_at)) / 1000), stopped.planned_sec)
+        )
+        stopped.completed = completed ? 1 : 0
+        return stopped
+      })
     },
 
     async focusActive() {
@@ -321,7 +345,7 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
       if (!sane) {
         throw apiError('VALIDATION', 'Backup file is invalid or corrupted')
       }
-      data = {
+      const importedData = {
         taskSeq: Math.max(0, ...payload.tasks.map((t) => t.id)),
         sessionSeq: Math.max(0, ...sessions.map((s) => s.id)),
         // normalize fields older backups may lack, matching the server's import
@@ -337,7 +361,8 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
           Object.entries(payload.settings ?? {}).map(([k, v]) => [k, String(v)])
         ),
       }
-      persist()
+      persist(importedData)
+      data = importedData
       return {
         imported: {
           tasks: data.tasks.length,
@@ -348,11 +373,12 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
     },
 
     async saveSettings(body = {}) {
-      for (const [key, value] of Object.entries(body)) {
-        data.settings[key] = String(value)
-      }
-      persist()
-      return { ...DEFAULT_SETTINGS, ...data.settings }
+      return commit((draft) => {
+        for (const [key, value] of Object.entries(body)) {
+          draft.settings[key] = String(value)
+        }
+        return { ...DEFAULT_SETTINGS, ...draft.settings }
+      })
     },
   }
 }

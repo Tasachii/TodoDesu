@@ -13,6 +13,14 @@ const taskBodyProps = {
   repeat: { enum: ['daily', 'weekly', 'monthly', null] },
 }
 
+function rejectBlankTitle(title, reply) {
+  if (typeof title === 'string' && title.trim().length === 0) {
+    reply.code(400).send({ error: { code: 'VALIDATION', message: 'title must not be blank' } })
+    return true
+  }
+  return false
+}
+
 export default async function tasksRoutes(app) {
   const { db } = app
   const now = app.now ?? (() => new Date())
@@ -59,6 +67,7 @@ export default async function tasksRoutes(app) {
     async (req, reply) => {
       const { title, notes = '', due_at = null, priority = 0, status = 'todo', repeat = null } =
         req.body
+      if (rejectBlankTitle(title, reply)) return
       if (repeat && !due_at) {
         return reply
           .code(400)
@@ -106,6 +115,7 @@ export default async function tasksRoutes(app) {
     async (req, reply) => {
       const task = taskById(db, req.params.id)
       if (!task || task.deleted_at) return notFound(reply)
+      if ('title' in req.body && rejectBlankTitle(req.body.title, reply)) return
 
       const updates = {}
       for (const key of ['title', 'notes', 'due_at', 'priority', 'sort_order', 'repeat']) {
