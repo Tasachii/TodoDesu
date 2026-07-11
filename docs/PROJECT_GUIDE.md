@@ -126,6 +126,7 @@ enables WAL mode and foreign keys, and purges old soft-deleted rows on startup.
 | `completed_at` | TEXT | Set when status becomes `done`, cleared when it leaves `done` |
 | `deleted_at` | TEXT | Soft-delete marker; NULL = live — see §7.3 |
 | `repeat` | TEXT | NULL or `daily`/`weekly`/`monthly`; requires `due_at`. Completing a repeating task inserts its next occurrence (due advanced past "now", time of day kept) |
+| `recurrence_parent_id` | INTEGER | Nullable self-reference to the occurrence that generated this row; uniquely indexed so a parent cannot spawn twice |
 
 Partial indexes on `status` and `due_at` (both `WHERE deleted_at IS NULL`) cover the two
 hot queries: board columns and date-range filters.
@@ -191,7 +192,8 @@ build an app around an in-memory DB. It:
   3. **recurring** — a `repeat` rule (`daily`/`weekly`/`monthly`) requires a due date
      (400 otherwise; clear both together), and completing a repeating task inserts its
      next occurrence via `nextDueAt()`: due advanced past "now", time of day kept,
-     monthly clamped in short months (the 31st → Feb 28). The same function is
+     monthly clamped in short months (the 31st → Feb 28). The generated row links back
+     through `recurrence_parent_id`; its unique index makes done/undo/done idempotent. The same function is
      duplicated in the standalone engine — change them together.
 - `DELETE` sets `deleted_at` (soft); `POST /:id/restore` clears it. Both 404 when the task
   is in the wrong state, so they are safe to retry.

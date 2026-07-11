@@ -40,6 +40,15 @@ const MIGRATIONS = [
   ALTER TABLE tasks ADD COLUMN repeat TEXT
     CHECK (repeat IS NULL OR repeat IN ('daily','weekly','monthly'));
   `,
+  // v3 — link each generated occurrence to its parent. The unique index makes
+  // recurrence spawning idempotent while NULL keeps every pre-v3 row valid.
+  `
+  ALTER TABLE tasks ADD COLUMN recurrence_parent_id INTEGER
+    REFERENCES tasks(id) ON DELETE SET NULL;
+  CREATE UNIQUE INDEX idx_tasks_recurrence_parent
+    ON tasks (recurrence_parent_id)
+    WHERE recurrence_parent_id IS NOT NULL;
+  `,
 ]
 
 export function defaultDbPath() {

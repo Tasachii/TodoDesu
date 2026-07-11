@@ -115,6 +115,31 @@ describe('tasks', () => {
     const reopened = createLocalApi(storage)
     await expect(reopened.restoreTask(a.id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
+
+  it('searches normal text and treats %, _, and backslash as literal characters', async () => {
+    await api.createTask({ title: 'buy milk' })
+    await api.createTask({ title: 'call mum', notes: 'about the milk run' })
+    await api.createTask({ title: 'budget 100% ready' })
+    await api.createTask({ title: 'budget 1000 ready' })
+    await api.createTask({ title: 'snake_case' })
+    await api.createTask({ title: 'snakeXcase' })
+    await api.createTask({ title: String.raw`path\name` })
+    await api.createTask({ title: 'pathname' })
+
+    expect((await api.tasks({ q: 'milk' })).map((task) => task.title)).toEqual([
+      'buy milk',
+      'call mum',
+    ])
+    expect((await api.tasks({ q: '100%' })).map((task) => task.title)).toEqual([
+      'budget 100% ready',
+    ])
+    expect((await api.tasks({ q: 'snake_case' })).map((task) => task.title)).toEqual([
+      'snake_case',
+    ])
+    expect((await api.tasks({ q: String.raw`path\name` })).map((task) => task.title)).toEqual([
+      String.raw`path\name`,
+    ])
+  })
 })
 
 describe('recurring tasks', () => {
@@ -134,6 +159,26 @@ describe('recurring tasks', () => {
     // completing the same task again (idempotent toggle) must not spawn twice
     await api.patchTask(task.id, { status: 'done' })
     expect((await api.tasks()).filter((t) => t.title === 'water plants')).toHaveLength(2)
+  })
+
+  it('done → todo → done on the same occurrence never spawns a duplicate', async () => {
+    const task = await api.createTask({
+      title: 'water plants',
+      due_at: hours(26),
+      repeat: 'daily',
+    })
+    await api.patchTask(task.id, { status: 'done' })
+    const child = (await api.tasks()).find(
+      (candidate) => candidate.recurrence_parent_id === task.id
+    )
+    expect(child).toBeTruthy()
+
+    await api.patchTask(task.id, { status: 'todo' })
+    await api.patchTask(task.id, { status: 'done' })
+
+    expect(
+      (await api.tasks()).filter((candidate) => candidate.recurrence_parent_id === task.id)
+    ).toEqual([expect.objectContaining({ id: child.id })])
   })
 
   it('monthly recurrence clamps short months instead of overflowing', async () => {
@@ -284,6 +329,16 @@ describe('settings and persistence', () => {
     expect(next.id).toBeGreaterThan(gone.id)
   })
 
+  it('normalizes recurrence linkage missing from a v1 backup', async () => {
+    const legacy = {
+      app: 'todoo',
+      version: 1,
+      tasks: [{ id: 4, title: 'legacy', status: 'todo', sort_order: 1 }],
+    }
+    await api.importData(legacy)
+    expect((await api.tasks())[0].recurrence_parent_id).toBeNull()
+  })
+
   it('importData rejects non-backup payloads', async () => {
     await expect(api.importData({ hello: 'world' })).rejects.toMatchObject({
       code: 'VALIDATION',
@@ -332,6 +387,7 @@ describe('settings and persistence', () => {
       JSON.stringify({ tasks: [{ id: 7, title: 'old', status: 'todo', sort_order: 1 }] })
     )
     const reopened = createLocalApi(storage)
+    expect((await reopened.tasks())[0].recurrence_parent_id).toBeNull()
     const created = await reopened.createTask({ title: 'new' })
     expect(created.id).toBe(8)
   })

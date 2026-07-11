@@ -40,8 +40,10 @@ export default async function backupRoutes(app) {
       const { tasks = [], focus_sessions = [], settings = {} } = req.body
 
       const insertTask = db.prepare(
-        `INSERT INTO tasks (id, title, notes, status, due_at, priority, sort_order, created_at, completed_at, deleted_at, repeat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tasks
+           (id, title, notes, status, due_at, priority, sort_order, created_at, completed_at,
+            deleted_at, repeat, recurrence_parent_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       const insertSession = db.prepare(
         `INSERT INTO focus_sessions (id, task_id, planned_sec, started_at, ended_at, duration_sec, completed)
@@ -52,6 +54,9 @@ export default async function backupRoutes(app) {
       // Replace everything atomically — a failed import leaves the old data intact.
       db.exec('BEGIN')
       try {
+        // Backups are normally id-ordered, but defer the new self-reference so
+        // a valid externally reordered payload also imports atomically.
+        db.exec('PRAGMA defer_foreign_keys = ON')
         db.exec('DELETE FROM focus_sessions; DELETE FROM tasks; DELETE FROM settings;')
         for (const t of tasks) {
           insertTask.run(
@@ -65,7 +70,8 @@ export default async function backupRoutes(app) {
             t.created_at ?? new Date().toISOString(),
             t.completed_at ?? null,
             t.deleted_at ?? null,
-            t.repeat ?? null
+            t.repeat ?? null,
+            t.recurrence_parent_id ?? null
           )
         }
         for (const s of focus_sessions) {

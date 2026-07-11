@@ -186,14 +186,14 @@ npm run lint                          # ESLint flat config + react-hooks across 
 npm run test:e2e -w @todoo/web        # Playwright smoke suite (build first)
 ```
 
-224 unit tests across four workspaces, plus 7 Playwright e2e scenarios:
+238 unit tests across four workspaces, plus 7 Playwright e2e scenarios:
 
 | Suite | Count | What it covers |
 | --- | --- | --- |
 | `@todoo/core` | 23 | `nextDueAt` recurrence rule — daily/weekly/monthly, DST, leap years, multi-miss catch-up, and server ⇄ engine parity (100 % coverage enforced) |
-| `@todoo/server` | 47 | Every endpoint via Fastify injection (no real network): CRUD, recurrence with an injected clock, focus start/stop incl. backward-clock 0-clamp and idempotency, `q`-search, stats range edges, backup round-trip, optional LAN token auth |
+| `@todoo/server` | 54 | Every endpoint via Fastify injection (no real network): CRUD, idempotent recurrence + v2 migration, focus start/stop incl. backward-clock 0-clamp and idempotency, literal `q`-search, stats range edges, backup round-trip, optional LAN token auth |
 | `@todoo/cli` | 54 | Natural-language date parsing, API wrapper against a live server, on-disk state store, every command handler (`done` / `rm` / `undo` / `focus` / `server` …) driven through injectable deps |
-| `@todoo/web` | 100 | Standalone localStorage engine, quick-add date detection, `useTasks` optimistic-update + rollback, focus/pomodoro engine with once-only guards, theme switching, board fractional-midpoint reorder, HTTP client |
+| `@todoo/web` | 107 | Standalone localStorage engine, quick-add date detection, `useTasks` optimistic-update + rollback, focus/pomodoro engine with once-only guards, theme switching, board fractional-midpoint reorder, HTTP client |
 | e2e | 7 scenarios | Playwright smoke against the real build + real server in headless Chromium: quick-add NL date, undo toast, search, the 和 theme, board columns, pomodoro mode switch, recurring-task spawn |
 
 Coverage thresholds are enforced per package in each `vitest.config.js` (server 90 / cli 80

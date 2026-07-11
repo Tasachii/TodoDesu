@@ -90,6 +90,9 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
       }
     }
   }
+  // Additive snapshot migration: old localStorage data and v1 backups do not
+  // carry recurrence linkage. NULL preserves those tasks without guessing.
+  data.tasks = data.tasks.map((task) => ({ recurrence_parent_id: null, ...task }))
   // Reconcile sequence counters with the actual data so a partial snapshot
   // can never hand out colliding ids.
   data.taskSeq = Math.max(data.taskSeq, ...data.tasks.map((t) => t.id), 0)
@@ -137,8 +140,29 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
   }
 
   return {
-    async tasks() {
-      return live()
+    async tasks(params = {}) {
+      const deleted = params.deleted === 'true'
+      let tasks = data.tasks.filter((task) =>
+        deleted ? Boolean(task.deleted_at) : !task.deleted_at
+      )
+      if (params.status) {
+        const statuses = String(params.status).split(',')
+        tasks = tasks.filter((task) => statuses.includes(task.status))
+      }
+      if (params.due_after) {
+        tasks = tasks.filter((task) => task.due_at && task.due_at >= params.due_after)
+      }
+      if (params.due_before) {
+        tasks = tasks.filter((task) => task.due_at && task.due_at < params.due_before)
+      }
+      if (params.q) {
+        const query = String(params.q).toLowerCase()
+        tasks = tasks.filter(
+          (task) =>
+            task.title.toLowerCase().includes(query) || (task.notes ?? '').toLowerCase().includes(query)
+        )
+      }
+      return tasks
         .slice()
         .sort((a, b) => a.sort_order - b.sort_order)
     },
@@ -170,6 +194,7 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
           completed_at: status === 'done' ? t : null,
           deleted_at: null,
           repeat,
+          recurrence_parent_id: null,
         }
         draft.tasks.push(task)
         return task
@@ -196,7 +221,10 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
           task.completed_at = body.status === 'done' ? iso() : null
           if (!('sort_order' in body)) task.sort_order = nextSortOrder(body.status, draft)
         }
-        if (!wasDone && task.status === 'done' && task.repeat && task.due_at) {
+        const alreadySpawned = draft.tasks.some(
+          (candidate) => candidate.recurrence_parent_id === task.id
+        )
+        if (!wasDone && task.status === 'done' && task.repeat && task.due_at && !alreadySpawned) {
           draft.tasks.push({
             id: ++draft.taskSeq,
             title: task.title,
@@ -209,6 +237,7 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
             completed_at: null,
             deleted_at: null,
             repeat: task.repeat,
+            recurrence_parent_id: task.id,
           })
         }
         return task
@@ -355,6 +384,7 @@ export function createLocalApi(storage = defaultStorage(), now = () => new Date(
           completed_at: t.completed_at ?? null,
           deleted_at: t.deleted_at ?? null,
           repeat: t.repeat ?? null,
+          recurrence_parent_id: t.recurrence_parent_id ?? null,
         })),
         sessions,
         settings: Object.fromEntries(

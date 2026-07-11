@@ -4,6 +4,10 @@ import { nextDueAt } from '@todoo/core'
 // Re-exported for tests that import it from this route module.
 export { nextDueAt }
 
+function escapeLikeLiteral(value) {
+  return String(value).replace(/[\\%_]/g, '\\$&')
+}
+
 const taskBodyProps = {
   title: { type: 'string', minLength: 1, maxLength: 500 },
   notes: { type: 'string', maxLength: 10000 },
@@ -43,8 +47,9 @@ export default async function tasksRoutes(app) {
       params.push(due_before)
     }
     if (q) {
-      clauses.push('(title LIKE ? OR notes LIKE ?)')
-      params.push(`%${q}%`, `%${q}%`)
+      const pattern = `%${escapeLikeLiteral(q)}%`
+      clauses.push("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')")
+      params.push(pattern, pattern)
     }
     const tasks = db
       .prepare(`SELECT * FROM tasks WHERE ${clauses.join(' AND ')} ORDER BY sort_order ASC`)
@@ -143,8 +148,10 @@ export default async function tasksRoutes(app) {
       // recurring: completing a repeating task spawns its next occurrence
       if (updates.status === 'done' && fresh.repeat && fresh.due_at) {
         db.prepare(
-          `INSERT INTO tasks (title, notes, status, due_at, priority, sort_order, created_at, repeat)
-           VALUES (?, ?, 'todo', ?, ?, ?, ?, ?)`
+          `INSERT INTO tasks
+             (title, notes, status, due_at, priority, sort_order, created_at, repeat, recurrence_parent_id)
+           VALUES (?, ?, 'todo', ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO NOTHING`
         ).run(
           fresh.title,
           fresh.notes,
@@ -152,7 +159,8 @@ export default async function tasksRoutes(app) {
           fresh.priority,
           nextSortOrder(db, 'todo'),
           now().toISOString(),
-          fresh.repeat
+          fresh.repeat,
+          fresh.id
         )
       }
       return { task: fresh }

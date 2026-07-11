@@ -154,6 +154,23 @@ describe('recurring tasks', () => {
     expect(new Date(next.due_at) - new Date(due)).toBe(24 * 3600_000)
   })
 
+  it('done → todo → done on the same occurrence never spawns a duplicate', async () => {
+    const task = await createTask({ title: 'water plants', due_at: hours(26), repeat: 'daily' })
+    await app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, body: { status: 'done' } })
+
+    const firstList = (await app.inject({ method: 'GET', url: '/api/tasks' })).json().tasks
+    const child = firstList.find((candidate) => candidate.recurrence_parent_id === task.id)
+    expect(child).toBeTruthy()
+
+    await app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, body: { status: 'todo' } })
+    await app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, body: { status: 'done' } })
+
+    const finalList = (await app.inject({ method: 'GET', url: '/api/tasks' })).json().tasks
+    expect(finalList.filter((candidate) => candidate.recurrence_parent_id === task.id)).toEqual([
+      expect.objectContaining({ id: child.id }),
+    ])
+  })
+
   it('weekly repeats jump a week; overdue dailies land in the future', async () => {
     const weekly = await createTask({ title: 'review', due_at: hours(2), repeat: 'weekly' })
     await app.inject({ method: 'PATCH', url: `/api/tasks/${weekly.id}`, body: { status: 'done' } })
@@ -347,6 +364,8 @@ describe('backup', () => {
     const res = await fresh.inject({ method: 'POST', url: '/api/import', body: dump })
     expect(res.statusCode).toBe(200)
     expect(res.json().imported.tasks).toBe(1)
+    const imported = (await fresh.inject({ method: 'GET', url: '/api/tasks/1' })).json().task
+    expect(imported.recurrence_parent_id).toBeNull()
   })
 })
 

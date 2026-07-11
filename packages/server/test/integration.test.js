@@ -147,6 +147,25 @@ describe('GET /api/tasks — q search', () => {
     })
     expect(res.json().tasks.map((t) => t.title)).toEqual(['report draft'])
   })
+
+  it.each([
+    ['100%', ['budget 100% ready']],
+    ['snake_case', ['snake_case']],
+    [String.raw`path\name`, [String.raw`path\name`]],
+  ])('treats LIKE wildcard/escape characters in %s as literals', async (query, expected) => {
+    await createTask({ title: 'budget 100% ready' })
+    await createTask({ title: 'budget 1000 ready' })
+    await createTask({ title: 'snake_case' })
+    await createTask({ title: 'snakeXcase' })
+    await createTask({ title: String.raw`path\name` })
+    await createTask({ title: 'pathname' })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/tasks?q=${encodeURIComponent(query)}`,
+    })
+    expect(res.json().tasks.map((task) => task.title)).toEqual(expected)
+  })
 })
 
 describe('PATCH /api/tasks/:id — minimal updates', () => {
