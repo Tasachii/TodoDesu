@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { useUI } from '../App.jsx'
 import { useTheme } from '../hooks/useTheme.js'
 import SettingsSheet from './SettingsSheet.jsx'
+import ReminderScheduler from './ReminderScheduler.jsx'
 import {
   TodayIcon,
   BoardIcon,
@@ -154,6 +155,7 @@ export default function AppShell({ children }) {
       </nav>
 
       <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ReminderScheduler />
     </div>
   )
 }

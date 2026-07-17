@@ -16,6 +16,22 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+// Focus an open tab when a due-date reminder is tapped, or open one if the app
+// isn't running. Reminders are scheduled in the page (see ReminderScheduler);
+// this only handles the click, so there is still no push server involved.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const home = new URL('./', self.location).href
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) return client.focus()
+      }
+      return self.clients.openWindow ? self.clients.openWindow(home) : undefined
+    })
+  )
+})
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (event.request.method !== 'GET' || url.pathname.startsWith('/api/')) return
